@@ -1,0 +1,12 @@
+cbor2==5.9.0
+pyzmq==27.1.0
+stable-baselines3
+coppeliasim-zmqremoteapi-client
+gymnasium==1.2.3
+numpy==2.4.4
+opencv-python==4.13.0.92
+tensorboard==2.20.0
+# python -c "import gymnasium; import stable_baselines3; print('安装成功')"
+
+
+# pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124

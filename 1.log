@@ -1,0 +1,71 @@
+(Tennis_Collector) PS D:\PyCharmCommunity\Tennis_Collector> python -c "import gymnasium; import stable_baselines3; print('✅ 安装成功')"
+✅ 安装成功
+(Tennis_Collector) PS D:\PyCharmCommunity\Tennis_Collector> pip install tensorboard
+Looking in indexes: https://mirrors.ustc.edu.cn/pypi/web/simple
+Collecting tensorboard
+  Downloading https://mirrors.ustc.edu.cn/pypi/packages/9c/d9/a5db55f88f258ac669a92858b70a714bbbd5acd993820b41ec4a96a4d77f/tensorboard-2.20.0-py3-none-any.whl (5.5 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.5/5.5 MB 7.5 MB/s  0:00:00
+Collecting absl-py>=0.4 (from tensorboard)
+  Downloading https://mirrors.ustc.edu.cn/pypi/packages/18/a6/907a406bb7d359e6a63f99c313846d9eec4f7e6f7437809e03aa00fa3074/absl_py-2.4.0-py3-none-any.whl (135 kB)
+Collecting grpcio>=1.48.2 (from tensorboard)
+  Downloading https://mirrors.ustc.edu.cn/pypi/packages/6f/d4/ae92206d01183b08613e846076115f5ac5991bae358d2a749fa864da5699/grpcio-1.80.0-cp311-cp311-win_amd64.whl (4.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.9/4.9 MB 8.2 MB/s  0:00:00
+Collecting markdown>=2.6.8 (from tensorboard)
+  Downloading https://mirrors.ustc.edu.cn/pypi/packages/de/1f/77fa3081e4f66ca3576c896ae5d31c3002ac6607f9747d2e3aa49227e464/markdown-3.10.2-py3-none-any.whl (108 kB)
+Requirement already satisfied: numpy>=1.12.0 in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from tensorboard) (2.4.4)
+Requirement already satisfied: packaging in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from tensorboard) (25.0)
+Requirement already satisfied: pillow in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from tensorboard) (12.1.1)
+Collecting protobuf!=4.24.0,>=3.19.6 (from tensorboard)
+  Downloading https://mirrors.ustc.edu.cn/pypi/packages/4d/87/cb5e585192a22b8bd457df5a2c16a75ea0db9674c3a0a39fc9347d84e075/protobuf-7.34.1-cp310-abi3-win_amd64.whl (437 kB)
+Requirement already satisfied: setuptools>=41.0.0 in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from tensorboard) (80.10.2)
+Collecting tensorboard-data-server<0.8.0,>=0.7.0 (from tensorboard)
+  Using cached https://mirrors.ustc.edu.cn/pypi/packages/7a/13/e503968fefabd4c6b2650af21e110aa8466fe21432cd7c43a84577a89438/tensorboard_data_server-0.7.2-py3-none-any.whl (2.4 kB)
+Collecting werkzeug>=1.0.1 (from tensorboard)
+  Downloading https://mirrors.ustc.edu.cn/pypi/packages/7f/b2/0bba9bbb4596d2d2f285a16c2ab04118f6b957d8441566e1abb892e6a6b2/werkzeug-3.1.7-py3-none-any.whl (226 kB)
+Requirement already satisfied: typing-extensions~=4.12 in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from grpcio>=1.48.2->tensorboard) (4.15.0)
+Requirement already satisfied: markupsafe>=2.1.1 in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from werkzeug>=1.0.1->tensorboard) (3.0.3)
+Installing collected packages: werkzeug, tensorboard-data-server, protobuf, markdown, grpcio, absl-py, tensorboard
+Successfully installed absl-py-2.4.0 grpcio-1.80.0 markdown-3.10.2 protobuf-7.34.1 tensorboard-2.20.0 tensorboard-data-server-0.7.2 werkzeug-3.1.7
+
+(Tennis_Collector) PS D:\PyCharmCommunity\Tennis_Collector> pip show tensorboard
+Name: tensorboard
+Version: 2.20.0
+Summary: TensorBoard lets you watch Tensors Flow
+Home-page: https://github.com/tensorflow/tensorboard
+Author: Google Inc.
+Author-email: packages@tensorflow.org
+License: Apache 2.0
+Location: E:\Anaconda\envs\Tennis_Collector\Lib\site-packages
+Requires: absl-py, grpcio, markdown, numpy, packaging, pillow, protobuf, setuptools, tensorboard-data-server, werkzeug
+Required-by:
+(Tennis_Collector) PS D:\PyCharmCommunity\Tennis_Collector> pip install torch==2.6.0 torchvision==0.21.0 -i https://pypi.tuna.tsinghua.edu.cn/simple
+Looking in indexes: https://pypi.tuna.tsinghua.edu.cn/simple
+Collecting torch==2.6.0
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/11/c5/2370d96b31eb1841c3a0883a492c15278a6718ccad61bb6a649c80d1d9eb/torch-2.6.0-cp311-cp311-win_amd64.whl (204.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 204.2/204.2 MB 15.2 MB/s  0:00:13
+Collecting torchvision==0.21.0
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/88/53/4ad334b9b1d8dd99836869fec139cb74a27781298360b91b9506c53f1d10/torchvision-0.21.0-cp311-cp311-win_amd64.whl (1.6 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.6/1.6 MB 11.9 MB/s  0:00:00
+Requirement already satisfied: filelock in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from torch==2.6.0) (3.25.2)
+Requirement already satisfied: typing-extensions>=4.10.0 in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from torch==2.6.0) (4.15.0)
+Requirement already satisfied: networkx in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from torch==2.6.0) (3.6.1)
+Requirement already satisfied: jinja2 in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from torch==2.6.0) (3.1.6)
+Requirement already satisfied: fsspec in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from torch==2.6.0) (2026.3.0)
+Collecting sympy==1.13.1 (from torch==2.6.0)
+  Downloading https://pypi.tuna.tsinghua.edu.cn/packages/b2/fe/81695a1aa331a842b582453b605175f419fe8540355886031328089d840a/sympy-1.13.1-py3-none-any.whl (6.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.2/6.2 MB 16.5 MB/s  0:00:00
+Requirement already satisfied: numpy in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from torchvision==0.21.0) (2.4.4)
+Requirement already satisfied: pillow!=8.3.*,>=5.3.0 in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from torchvision==0.21.0) (12.1.1)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from sympy==1.13.1->torch==2.6.0) (1.3.0)
+Requirement already satisfied: MarkupSafe>=2.0 in E:\Anaconda\envs\Tennis_Collector\Lib\site-packages (from jinja2->torch==2.6.0) (3.0.3)
+Installing collected packages: sympy, torch, torchvision
+  Attempting uninstall: sympy
+    Found existing installation: sympy 1.14.0
+    Uninstalling sympy-1.14.0:
+      Successfully uninstalled sympy-1.14.0
+  Attempting uninstall: torch
+    Found existing installation: torch 2.11.0
+    Uninstalling torch-2.11.0:
+      Successfully uninstalled torch-2.11.0
+Successfully installed sympy-1.13.1 torch-2.6.0 torchvision-0.21.0
+(Tennis_Collector) PS D:\PyCharmCommunity\Tennis_Collector>
