@@ -663,7 +663,7 @@ if __name__ == "__main__":
     try:
         collect_all_balls()
     except KeyboardInterrupt:
-        print("\n🛑 用户中断，停止机器人...")
+        print("\n用户中断，停止机器人...")
     finally:
         stop_robot()
-        print("✅ 电机已停止，程序退出")
+        print("电机已停止，程序退出")
