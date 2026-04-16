@@ -171,17 +171,68 @@ local C = {
 
 -- ══════════════════════════════════════════════════════════════
 --  ① 地面: 基底 → 外场(绿) → 内场(蓝)
+--
+--  关键设计: 视觉分层 + 物理合一
+--  ┌─────────────────────────────────────────────────────────┐
+--  │ 视觉层 (非 respondable, 仅供渲染)                        │
+--  │   - 蓝色内场顶面 z = +0.012                              │
+--  │   - 绿色外场顶面 z = +0.004                              │
+--  │   - 两层 z 差 8mm, 远超 Z-fighting 阈值, 渲染稳定        │
+--  │                                                          │
+--  │ 物理层 (respondable, 可选不可见)                         │
+--  │   - 单一平整碰撞面, 顶面 z = 0.000, 覆盖整个场地          │
+--  │   - YouBot 始终在一个连续平面上滚动, 绝无台阶            │
+--  └─────────────────────────────────────────────────────────┘
 -- ══════════════════════════════════════════════════════════════
-box("Ground_Base",   {0, 0, -0.06}, {FL + 4, FW + 4, 0.06}, C.ground, true)
-box("Outer_Court",   {0, 0, -0.02}, {OL, OW, 0.03},         C.outer,  true)
-box("Court_Surface", {0, 0, -0.002},{CL, DW, 0.02},          C.inner,  true)
+
+-- ---- 物理层: 单一平整地板 (唯一 respondable 的地面) ----------
+-- 尺寸取最大外围, 保证 YouBot 无论在哪都踩在它上面
+local physGround = sim.createPrimitiveShape(
+    sim.primitiveshape_cuboid, {FL + 4, FW + 4, 0.10}, 0)
+sim.setObjectPosition(physGround, {0, 0, -0.05}, W)   -- 顶面正好 z = 0
+sim.setObjectInt32Param(physGround, sim.shapeintparam_static, 1)
+sim.setObjectInt32Param(physGround, sim.shapeintparam_respondable, 1)
+sim.setShapeColor(physGround, nil, sim.colorcomponent_ambient_diffuse, C.ground)
+sim.setObjectAlias(physGround, "Ground_Physics")
+-- 把物理层放到一个独立图层, 默认不渲染, 调试时可通过 Layer Selection 打开
+-- CoppeliaSim 的可见层默认是 1..8, 这里用 layer 9 (bit 256) 隐藏
+sim.setObjectInt32Param(physGround, sim.objintparam_visibility_layer, 256)
+
+-- ---- 视觉层: 绿色外场 (薄片, 不参与碰撞) ---------------------
+local visOuter = sim.createPrimitiveShape(
+    sim.primitiveshape_cuboid, {OL, OW, 0.004}, 0)
+sim.setObjectPosition(visOuter, {0, 0, 0.002}, W)     -- 顶面 z = 0.004
+sim.setObjectInt32Param(visOuter, sim.shapeintparam_static, 1)
+sim.setObjectInt32Param(visOuter, sim.shapeintparam_respondable, 0)  -- ← 关键: 不碰撞
+sim.setShapeColor(visOuter, nil, sim.colorcomponent_ambient_diffuse, C.outer)
+sim.setObjectAlias(visOuter, "Outer_Court")
+
+-- ---- 视觉层: 蓝色内场 (薄片, 不参与碰撞) ---------------------
+local visInner = sim.createPrimitiveShape(
+    sim.primitiveshape_cuboid, {CL, DW, 0.004}, 0)
+sim.setObjectPosition(visInner, {0, 0, 0.010}, W)     -- 顶面 z = 0.012
+sim.setObjectInt32Param(visInner, sim.shapeintparam_static, 1)
+sim.setObjectInt32Param(visInner, sim.shapeintparam_respondable, 0)  -- ← 关键: 不碰撞
+sim.setShapeColor(visInner, nil, sim.colorcomponent_ambient_diffuse, C.inner)
+sim.setObjectAlias(visInner, "Court_Surface")
+
+-- ---- 视觉基底 (超大绿色薄片, 覆盖围栏外区域) ------------------
+local visBase = sim.createPrimitiveShape(
+    sim.primitiveshape_cuboid, {FL + 4, FW + 4, 0.004}, 0)
+sim.setObjectPosition(visBase, {0, 0, -0.002}, W)     -- 顶面 z = 0, 与物理面共面但不冲突(物理面在 layer 9)
+sim.setObjectInt32Param(visBase, sim.shapeintparam_static, 1)
+sim.setObjectInt32Param(visBase, sim.shapeintparam_respondable, 0)
+sim.setShapeColor(visBase, nil, sim.colorcomponent_ambient_diffuse, C.ground)
+sim.setObjectAlias(visBase, "Ground_Base")
 
 -- ══════════════════════════════════════════════════════════════
 --  ② 白线 (ITF 标准, 线宽 5cm)
 -- ══════════════════════════════════════════════════════════════
 local LT = 0.05
 local LE = 0.005
-local LZ = 0.008
+-- 白线略高于蓝色内场视觉面 (z=0.012), 避免 Z-fighting
+-- 0.012 (蓝面顶) + LE/2 (线厚一半) + 0.003 (安全间距) = 0.0175 ≈ 0.018
+local LZ = 0.018
 local LC = C.line
 
 -- 底线: X = ±CL/2, 平行 Y, 长度 = DW
@@ -206,6 +257,16 @@ box("Line_Center",       {0, 0, LZ}, {SLD * 2, LT, LE}, LC, true)
 -- 底线中心标记 (15cm 短线)
 box("Line_CenterMark_E", { CL/2 - 0.075, 0, LZ}, {0.15, LT, LE}, LC, true)
 box("Line_CenterMark_W", {-CL/2 + 0.075, 0, LZ}, {0.15, LT, LE}, LC, true)
+
+-- ---- 把所有 Line_* 设为不响应碰撞 ----------------------------
+-- 白线是纯视觉元素, 不能让 YouBot 轮子撞上去产生颠簸
+local _allObj = sim.getObjectsInTree(sim.handle_scene, sim.handle_all, 0)
+for _, _h in ipairs(_allObj) do
+    local _ok, _alias = pcall(sim.getObjectAlias, _h, 0)
+    if _ok and _alias and _alias:sub(1, 5) == "Line_" then
+        sim.setObjectInt32Param(_h, sim.shapeintparam_respondable, 0)
+    end
+end
 
 -- ══════════════════════════════════════════════════════════════
 --  ③ 球网
@@ -325,21 +386,48 @@ end
 makeBench(1,  0, -OW/2 + 0.8)
 makeBench(2,  0,  OW/2 - 0.8)
 
--- ══════════════════════════════════════════════════════════════
---  ⑦ 回收仓
--- ══════════════════════════════════════════════════════════════
-local BX, BY = CL/2 + 2.5, OW/2 - 2.0
 
-box("Bin_Base",    {BX, BY, 0.02},                {0.80, 0.80, 0.03}, C.bin_body, true)
-box("Bin_Back",    {BX + 0.39, BY, 0.25},         {0.04, 0.80, 0.46}, C.bin_body, true)
-box("Bin_L",       {BX, BY + 0.39, 0.25},         {0.80, 0.04, 0.46}, C.bin_body, true)
-box("Bin_R",       {BX, BY - 0.39, 0.25},         {0.80, 0.04, 0.46}, C.bin_body, true)
-box("Bin_Front_L", {BX - 0.39, BY + 0.22, 0.14}, {0.04, 0.30, 0.24}, C.bin_body, true)
-box("Bin_Front_R", {BX - 0.39, BY - 0.22, 0.14}, {0.04, 0.30, 0.24}, C.bin_body, true)
-box("Bin_Rim",     {BX, BY, 0.48},                {0.84, 0.84, 0.02}, C.bin_rim, true)
+-- ══════════════════════════════════════════════════════════════
+--  ⑦ 回收仓（喇叭形导向口）
+-- ══════════════════════════════════════════════════════════════
+local BIN_W     = 1.00
+local BIN_D     = 0.80
+local BIN_WALL  = 0.46
+local BIN_THICK = 0.04
+local GUIDE_LEN = 0.40
+
+local C_body = C.bin_body
+local C_rim  = C.bin_rim
+
+local BX = OL/2 - BIN_D/2
+local BY = OW/2 - BIN_W/2
+
+box("Bin_Base",  {BX, BY, BIN_THICK/2},             {BIN_D, BIN_W, BIN_THICK},        C_body, true)
+box("Bin_Back",  {BX + BIN_D/2, BY, BIN_WALL/2},    {BIN_THICK, BIN_W, BIN_WALL},     C_body, true)
+box("Bin_SideN", {BX, BY + BIN_W/2, BIN_WALL/2},    {BIN_D, BIN_THICK, BIN_WALL},     C_body, true)
+box("Bin_SideS", {BX, BY - BIN_W/2, BIN_WALL/2},    {BIN_D, BIN_THICK, BIN_WALL},     C_body, true)
+box("Bin_Rim",   {BX, BY, BIN_WALL + 0.01},         {BIN_D+0.04, BIN_W+0.04, 0.02},   C_rim,  true)
+
+local gx1 = BX - BIN_D/2
+local gx2 = gx1 - GUIDE_LEN * 0.7
+local g_len = math.sqrt((GUIDE_LEN*0.7)^2 + (GUIDE_LEN*0.5)^2)
+
+local gy1_top = BY + BIN_W/2
+local gy2_top = gy1_top + GUIDE_LEN * 0.5
+local g_angle_top = math.atan2(gy2_top - gy1_top, gx2 - gx1)
+local guide_n = box("Bin_GuideN", {(gx1+gx2)/2, (gy1_top+gy2_top)/2, BIN_WALL/2},
+    {g_len, BIN_THICK, BIN_WALL}, C_body, true)
+sim.setObjectOrientation(guide_n, {0, 0, g_angle_top}, W)
+
+local gy1_bot = BY - BIN_W/2
+local gy2_bot = gy1_bot - GUIDE_LEN * 0.5
+local g_angle_bot = math.atan2(gy2_bot - gy1_bot, gx2 - gx1)
+local guide_s = box("Bin_GuideS", {(gx1+gx2)/2, (gy1_bot+gy2_bot)/2, BIN_WALL/2},
+    {g_len, BIN_THICK, BIN_WALL}, C_body, true)
+sim.setObjectOrientation(guide_s, {0, 0, g_angle_bot}, W)
 
 local bd = sim.createDummy(0.08)
-sim.setObjectPosition(bd, {BX - 0.50, BY, 0.25}, W)
+sim.setObjectPosition(bd, {gx1 - 0.50, BY, 0.25}, W)
 sim.setObjectAlias(bd, "Bin_Entry")
 
 -- ══════════════════════════════════════════════════════════════

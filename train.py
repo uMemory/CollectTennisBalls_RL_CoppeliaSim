@@ -1,352 +1,328 @@
 """
-train.py (v5)
-核心修复: ACTION_REPEAT — 每个动作保持多个仿真步
-─────────────────────────────────────────────────────
-根因: PPO 每步输出随机动作, 仿真步长 50ms → 20Hz 动作切换
-      连续两步动作可能完全相反 → 高频抖动
-修复: 每个动作保持 ACTION_REPEAT=5 个仿真步 (250ms)
-      等效动作频率 4Hz, 机器人有充足时间响应
-─────────────────────────────────────────────────────
+train_ppo.py
+============
+PPO 训练脚本：训练半场捡网球 RL Agent
+
+使用 Stable-Baselines3 的 PPO 实现。
+
+用法：
+  1. 打开 CoppeliaSim，加载网球场景
+  2. 执行 tennis_scene_latest.lua（生成场地）
+  3. 执行 Tennis_Generate.lua（生成网球）
+  4. 点 Play ▶️ 启动仿真
+  5. 运行本脚本：python train_ppo.py
+
+训练产出：
+  ./logs/          TensorBoard 日志
+  ./models/        定期保存的模型检查点
+  ./models/final/  最终模型
+
+依赖：
+  pip install stable-baselines3 gymnasium numpy opencv-python
+  pip install coppeliasim_zmqremoteapi_client
+
+注意：
+  - 训练期间不开启 eval env（避免多环境连接同一个 CoppeliaSim 实例冲突）
+  - 评估请在训练完成后单独运行 eval 函数
+  - 如需查看训练曲线：tensorboard --logdir ./logs
 """
 
-import time
-import math
 import os
+import time
 import numpy as np
-import gymnasium as gym
-from gymnasium import spaces
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import (
+    CheckpointCallback,
+    BaseCallback,
+    CallbackList,
+)
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.callbacks import CheckpointCallback
-from coppeliasim_zmqremoteapi_client import RemoteAPIClient
+
+from tennis_rl_env import TennisCollectorEnv
 
 
-# ══════════════════════════════════════════════════════════════
-#  YouBot Controller
-# ══════════════════════════════════════════════════════════════
-class YouBotController:
-    # ── 关键参数 ──────────────────────────────────────────────
-    SPEED_SCALE   = 2.0     # 轮速系数 (YouBot 麦轮最大约 10 rad/s)
-    ACTION_REPEAT = 5       # ★ 核心修复: 每个动作保持 5 个仿真步
-    SMOOTH        = 0.4     # 动作平滑系数 (0=无平滑, 1=完全保持旧值)
+# =====================================================================
+#  训练参数
+# =====================================================================
 
-    def __init__(self):
-        client   = RemoteAPIClient()
-        self.sim = client.require('sim')
-        sim      = self.sim
+# ── 环境参数 ──
+ACTIVE_HALF    = 1         # 训练在 X>0 半场
 
-        # ── 同步模式 ─────────────────────────────────────────
-        sim.setStepping(True)
-        print("✅ Synchronous mode enabled")
+# ── PPO 超参数 ──
+TOTAL_TIMESTEPS = 500_000
+LEARNING_RATE   = 3e-4
+N_STEPS         = 1024     # 每次更新收集的步数
+BATCH_SIZE      = 64
+N_EPOCHS        = 10
+GAMMA           = 0.99
+GAE_LAMBDA      = 0.95
+CLIP_RANGE      = 0.2
+ENT_COEF        = 0.01
+VF_COEF         = 0.5
+MAX_GRAD_NORM   = 0.5
 
-        # ── 获取句柄 ─────────────────────────────────────────
-        self.body = sim.getObject('/youBot')
-        self.fl   = sim.getObject('/rollingJoint_fl')
-        self.fr   = sim.getObject('/rollingJoint_fr')
-        self.rl   = sim.getObject('/rollingJoint_rl')
-        self.rr   = sim.getObject('/rollingJoint_rr')
+# ── 网络架构 ──
+POLICY_KWARGS = dict(
+    net_arch=dict(
+        pi=[128, 128],
+        vf=[128, 128],
+    )
+)
 
-        # 4.10.0 API: 不传第二参数 = 世界坐标系
-        self.init_pos = list(sim.getObjectPosition(self.body))
-        self.init_ori = list(sim.getObjectOrientation(self.body))
-
-        self._prev_action   = [0.0, 0.0, 0.0]
-        self._reset_counter = 0
-
-        print("✅ YouBotController initialized")
-        print(f"   Start pos : {[f'{v:.3f}' for v in self.init_pos]}")
-        print(f"   ACTION_REPEAT = {self.ACTION_REPEAT}")
-        print(f"   Effective action freq ≈ {1.0 / (0.05 * self.ACTION_REPEAT):.1f} Hz")
-
-    # ── 运动控制 ──────────────────────────────────────────────
-    def move(self, vx: float, vy: float, omega: float):
-        """设置轮速, 内含平滑"""
-        # 平滑 (对动作而非轮速做平滑, 保证四轮协调)
-        s  = self.SMOOTH
-        vx    = s * self._prev_action[0] + (1 - s) * vx
-        vy    = s * self._prev_action[1] + (1 - s) * vy
-        omega = s * self._prev_action[2] + (1 - s) * omega
-        self._prev_action = [vx, vy, omega]
-
-        # YouBot 麦轮运动学
-        spd = self.SPEED_SCALE
-        self.sim.setJointTargetVelocity(self.fl, (-vx - vy - omega) * spd)
-        self.sim.setJointTargetVelocity(self.rl, (-vx + vy - omega) * spd)
-        self.sim.setJointTargetVelocity(self.rr, (-vx - vy + omega) * spd)
-        self.sim.setJointTargetVelocity(self.fr, (-vx + vy + omega) * spd)
-
-    def step_action(self):
-        """★ 核心: 保持当前轮速不变, 推进 ACTION_REPEAT 个仿真步"""
-        for _ in range(self.ACTION_REPEAT):
-            self.sim.step()
-
-    def stop(self):
-        self._prev_action = [0.0, 0.0, 0.0]
-        for j in [self.fl, self.fr, self.rl, self.rr]:
-            self.sim.setJointTargetVelocity(j, 0)
-
-    def get_pose(self):
-        pos = self.sim.getObjectPosition(self.body)
-        ori = self.sim.getObjectOrientation(self.body)
-        return pos[0], pos[1], ori[2]
-
-    def teleport_to_start(self):
-        self.stop()
-        self.sim.setObjectPosition(self.body, self.init_pos)
-        self.sim.setObjectOrientation(self.body, self.init_ori)
-        self._prev_action = [0.0, 0.0, 0.0]
-
-    def reset_episode(self):
-        self.teleport_to_start()
-        self._reset_counter += 1
-        self.sim.setInt32Signal('reset_counter', self._reset_counter)
-        # 给仿真几步时间稳定
-        for _ in range(10):
-            self.sim.step()
-
-    # ── 信号读取 ──────────────────────────────────────────────
-    def get_carried(self) -> int:
-        try:
-            v = self.sim.getInt32Signal('carried_balls')
-            return v if v is not None else 0
-        except:
-            return 0
-
-    def get_scored(self) -> int:
-        try:
-            v = self.sim.getInt32Signal('scored_balls')
-            return v if v is not None else 0
-        except:
-            return 0
-
-    def get_remaining(self) -> int:
-        try:
-            v = self.sim.getInt32Signal('remaining_balls')
-            return v if v is not None else 12
-        except:
-            return 12
-
-    def get_nearest_ball(self, n=12):
-        rx, ry, _ = self.get_pose()
-        min_dist  = float('inf')
-        ndx = ndy = 0.0
-        for i in range(1, n + 1):
-            try:
-                h   = self.sim.getObject(f'/TennisBall_{i:02d}')
-                pos = self.sim.getObjectPosition(h)
-                if pos[2] > 0.01:
-                    dx   = pos[0] - rx
-                    dy   = pos[1] - ry
-                    dist = math.hypot(dx, dy)
-                    if dist < min_dist:
-                        min_dist = dist
-                        ndx, ndy = dx, dy
-            except:
-                pass
-        if min_dist == float('inf'):
-            return 0.0, 0.0, 0.0
-        return ndx, ndy, min_dist
+# ── 保存与日志 ──
+LOG_DIR         = "./logs"
+MODEL_DIR       = "./models"
+FINAL_MODEL_DIR = "./models/final"
+SAVE_FREQ       = 10_000
 
 
-# ══════════════════════════════════════════════════════════════
-#  Gym Environment
-# ══════════════════════════════════════════════════════════════
-class TennisEnv(gym.Env):
-    NUM_BALLS = 12
-    MAX_CARRY = 5
+# =====================================================================
+#  训练日志回调
+# =====================================================================
 
-    # ★ 根据 v7 场景真实尺寸更新 ★
-    # 场地 23.77×10.97m, 围栏 38.6×20.3m
-    FENCE_L   = 38.6
-    FENCE_W   = 20.3
-    BIN_POS   = np.array([14.4, 8.2])   # 回收仓位置
+class TrainingLogCallback(BaseCallback):
+    """打印 episode 奖励统计"""
 
-    # 每个 env.step() = ACTION_REPEAT 个仿真步 = 250ms
-    # 3000 steps × 250ms = 750s = 12.5 分钟仿真时间, 足够
-    MAX_STEPS = 3000
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        self.episode_count = 0
+        self.episode_rewards = []
+        self.success_count = 0
 
-    def __init__(self):
-        super().__init__()
-        self.robot = YouBotController()
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            if "episode" in info:
+                self.episode_count += 1
+                ep_reward = info["episode"]["r"]
+                ep_length = info["episode"]["l"]
+                self.episode_rewards.append(ep_reward)
 
-        self.action_space = spaces.Box(
-            low  = np.full(3, -1.0, dtype=np.float32),
-            high = np.full(3,  1.0, dtype=np.float32),
-        )
-        self.observation_space = spaces.Box(
-            low=-np.inf, high=np.inf, shape=(11,), dtype=np.float32
-        )
+                # 判断是否成功（通过最终 reason）
+                is_success = info.get("success", False) or info.get("reason") == "ball_eliminated"
+                if is_success:
+                    self.success_count += 1
 
-        self._step         = 0
-        self._prev_scored  = 0
-        self._prev_carried = 0
-        self._prev_ball_dist = None
-        self._prev_bin_dist  = None
-
-    def reset(self, seed=None, options=None):
-        super().reset(seed=seed)
-        self.robot.reset_episode()
-        self._step           = 0
-        self._prev_scored    = 0
-        self._prev_carried   = 0
-        self._prev_ball_dist = None
-        self._prev_bin_dist  = None
-        return self._obs(), {}
-
-    def step(self, action):
-        vx    = float(action[0])
-        vy    = float(action[1])
-        omega = float(action[2])
-
-        # ★ 设置轮速 (含平滑)
-        self.robot.move(vx, vy, omega)
-
-        # ★ 保持动作推进 ACTION_REPEAT 步 (核心修复)
-        self.robot.step_action()
-
-        self._step += 1
-
-        # ── 读取状态 ─────────────────────────────────────────
-        rx, ry, _           = self.robot.get_pose()
-        carried             = self.robot.get_carried()
-        scored              = self.robot.get_scored()
-        remaining           = self.robot.get_remaining()
-        bdx, bdy, ball_dist = self.robot.get_nearest_ball()
-        bin_dx              = self.BIN_POS[0] - rx
-        bin_dy              = self.BIN_POS[1] - ry
-        bin_dist            = math.hypot(bin_dx, bin_dy)
-
-        # ── 奖励 ─────────────────────────────────────────────
-        reward     = -0.01          # 轻微时间惩罚
-        terminated = False
-        truncated  = self._step >= self.MAX_STEPS
-
-        # 出界惩罚 + 重置位置
-        half_l = self.FENCE_L / 2 - 0.5
-        half_w = self.FENCE_W / 2 - 0.5
-        if abs(rx) > half_l or abs(ry) > half_w:
-            reward -= 5.0
-            self.robot.teleport_to_start()
-            for _ in range(3):
-                self.robot.step_action()
-            rx, ry, _ = self.robot.get_pose()
-
-        # 接近球奖励
-        if carried < self.MAX_CARRY and ball_dist > 0:
-            if self._prev_ball_dist is not None:
-                delta = self._prev_ball_dist - ball_dist
-                reward += 2.0 * delta
-            self._prev_ball_dist = ball_dist
-        else:
-            self._prev_ball_dist = None
-
-        # 拾取奖励
-        if carried > self._prev_carried:
-            reward += 20.0 * (carried - self._prev_carried)
-        self._prev_carried = carried
-
-        # 接近仓奖励
-        if carried > 0:
-            if self._prev_bin_dist is not None:
-                delta = self._prev_bin_dist - bin_dist
-                reward += 1.5 * delta
-            self._prev_bin_dist = bin_dist
-        else:
-            self._prev_bin_dist = None
-
-        # 投放奖励
-        if scored > self._prev_scored:
-            reward           += 30.0 * (scored - self._prev_scored)
-            self._prev_scored = scored
-
-        # 全部完成
-        if scored >= self.NUM_BALLS:
-            reward    += 150.0
-            terminated = True
-
-        info = {
-            'carried'  : carried,
-            'scored'   : scored,
-            'remaining': remaining,
-            'step'     : self._step,
-        }
-        return self._obs(), reward, terminated, truncated, info
-
-    def _obs(self):
-        rx, ry, theta       = self.robot.get_pose()
-        carried             = self.robot.get_carried()
-        remaining           = self.robot.get_remaining()
-        bdx, bdy, ball_dist = self.robot.get_nearest_ball()
-        bin_dx              = self.BIN_POS[0] - rx
-        bin_dy              = self.BIN_POS[1] - ry
-        bin_dist            = math.hypot(bin_dx, bin_dy)
-
-        return np.array([
-            rx        / (self.FENCE_L / 2),
-            ry        / (self.FENCE_W / 2),
-            theta     / math.pi,
-            bdx       / self.FENCE_L,
-            bdy       / self.FENCE_W,
-            ball_dist / self.FENCE_L,
-            bin_dx    / self.FENCE_L,
-            bin_dy    / self.FENCE_W,
-            bin_dist  / self.FENCE_L,
-            carried   / self.MAX_CARRY,
-            remaining / self.NUM_BALLS,
-        ], dtype=np.float32)
-
-    def close(self):
-        self.robot.stop()
+                # 每 10 个 episode 打印一次统计
+                if self.episode_count % 10 == 0:
+                    recent = self.episode_rewards[-10:]
+                    mean_r = np.mean(recent)
+                    max_r = np.max(recent)
+                    min_r = np.min(recent)
+                    success_rate = self.success_count / self.episode_count * 100
+                    print(
+                        f"  📊 Ep {self.episode_count:5d} | "
+                        f"最近10局 mean={mean_r:+.1f} "
+                        f"max={max_r:+.1f} min={min_r:+.1f} | "
+                        f"成功率 {success_rate:.1f}% | "
+                        f"当前 R={ep_reward:+.1f} L={ep_length}"
+                    )
+        return True
 
 
-# ══════════════════════════════════════════════════════════════
-#  Training
-# ══════════════════════════════════════════════════════════════
-if __name__ == '__main__':
-    import torch
-    print(f"PyTorch : {torch.__version__}")
-    print(f"CUDA    : {torch.cuda.is_available()}")
+# =====================================================================
+#  主训练流程
+# =====================================================================
 
-    os.makedirs('models', exist_ok=True)
-    os.makedirs('logs',   exist_ok=True)
+def train():
+    print("=" * 60)
+    print("  PPO 训练：半场捡网球 RL Agent")
+    print("=" * 60)
+    print(f"  半场: {'X>0' if ACTIVE_HALF > 0 else 'X<0'}")
+    print(f"  总步数: {TOTAL_TIMESTEPS:,}")
+    print(f"  学习率: {LEARNING_RATE}")
+    print(f"  网络: pi={POLICY_KWARGS['net_arch']['pi']} "
+          f"vf={POLICY_KWARGS['net_arch']['vf']}")
+    print("=" * 60)
+    print()
+    print("  前置检查清单：")
+    print("    ☐ CoppeliaSim 已打开并加载场景")
+    print("    ☐ 网球已生成（场上可见黄绿色小球）")
+    print("    ☐ 仿真已点 Play ▶️ 处于运行状态")
+    print()
+    input("  确认以上条件后按 Enter 开始训练...")
 
-    env = Monitor(TennisEnv())
+    # 创建目录
+    os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    os.makedirs(FINAL_MODEL_DIR, exist_ok=True)
 
+    # ── 创建单个训练环境 ──
+    # 不使用 DummyVecEnv 包装，因为会引入不必要的额外初始化
+    # 也不使用 eval_env，避免双环境冲突 ZMQ 连接
+    print("\n⏳ 正在连接 CoppeliaSim 并创建环境...")
+    env = TennisCollectorEnv(
+        render_mode=None,    # 训练时关闭可视化，加速
+        active_half=ACTIVE_HALF,
+    )
+    env = Monitor(env)  # 包装一层 Monitor 以便统计 episode 信息
+    print("✅ 环境就绪")
+
+    # ── 创建 PPO 模型 ──
+    print("\n⏳ 正在创建 PPO 模型...")
     model = PPO(
-        'MlpPolicy', env,
-        learning_rate   = 3e-4,
-        n_steps         = 1024,     # 增大 buffer (每次收集更多经验)
-        batch_size      = 64,
-        n_epochs        = 10,
-        gamma           = 0.99,
-        gae_lambda      = 0.95,
-        clip_range      = 0.2,
-        ent_coef        = 0.01,
-        vf_coef         = 0.5,
-        max_grad_norm   = 0.5,
-        policy_kwargs   = dict(net_arch=[256, 256, 128]),
-        tensorboard_log = './logs/',
-        verbose         = 1,
-        device          = 'cpu',
+        policy="MlpPolicy", # 针对这个网络结构（非 CNN），用 CPU 训练通常会更快、更高效。
+        env=env,
+        learning_rate=LEARNING_RATE,
+        n_steps=N_STEPS,
+        batch_size=BATCH_SIZE,
+        n_epochs=N_EPOCHS,
+        gamma=GAMMA,
+        gae_lambda=GAE_LAMBDA,
+        clip_range=CLIP_RANGE,
+        ent_coef=ENT_COEF,
+        vf_coef=VF_COEF,
+        max_grad_norm=MAX_GRAD_NORM,
+        policy_kwargs=POLICY_KWARGS,
+        tensorboard_log=LOG_DIR,
+        verbose=1,
+        seed=42,
+        device='cpu'
     )
+    n_params = sum(p.numel() for p in model.policy.parameters())
+    print(f"✅ PPO 模型创建完成 | 参数量: {n_params:,}")
 
-    print("\n" + "=" * 60)
-    print("  YouBot Tennis Ball Collector — RL Training v5")
-    print("  ★ 核心修复: ACTION_REPEAT=5 (动作保持 250ms)")
-    print("  Make sure CoppeliaSim simulation is RUNNING")
-    print("=" * 60 + "\n")
-
-    model.learn(
-        total_timesteps     = 500_000,
-        callback            = CheckpointCallback(
-            save_freq   = 20_000,
-            save_path   = './models/',
-            name_prefix = 'youbot_ppo_v5',
-        ),
-        tb_log_name         = 'YouBot_v5',
-        reset_num_timesteps = True,
+    # ── 回调 ──
+    checkpoint_cb = CheckpointCallback(
+        save_freq=SAVE_FREQ,
+        save_path=MODEL_DIR,
+        name_prefix="ppo_tennis",
+        verbose=1,
     )
+    log_cb = TrainingLogCallback()
+    callbacks = CallbackList([checkpoint_cb, log_cb])
 
-    model.save('models/youbot_final_v5')
-    print('✅ Training complete! Model saved -> models/youbot_final_v5')
+    # ── 开始训练 ──
+    print("\n🚀 开始训练...")
+    print(f"   TensorBoard: tensorboard --logdir {LOG_DIR}")
+    print(f"   按 Ctrl+C 可随时中断并保存当前模型\n")
+
+    try:
+        model.learn(
+            total_timesteps=TOTAL_TIMESTEPS,
+            callback=callbacks,
+            progress_bar=False,   # progress_bar 可能与某些终端冲突
+        )
+    except KeyboardInterrupt:
+        print("\n\n⚠️ 用户中断训练")
+    except Exception as e:
+        print(f"\n\n❌ 训练异常: {e}")
+        import traceback
+        traceback.print_exc()
+
+    # ── 保存最终模型 ──
+    final_path = os.path.join(FINAL_MODEL_DIR, "ppo_tennis_final")
+    model.save(final_path)
+    print(f"\n💾 最终模型已保存: {final_path}.zip")
+
+    # ── 训练统计 ──
+    if log_cb.episode_count > 0:
+        success_rate = log_cb.success_count / log_cb.episode_count * 100
+        mean_reward = np.mean(log_cb.episode_rewards) if log_cb.episode_rewards else 0
+        print(f"\n📈 训练统计:")
+        print(f"   总 Episode 数: {log_cb.episode_count}")
+        print(f"   成功消除: {log_cb.success_count} 次")
+        print(f"   成功率: {success_rate:.1f}%")
+        print(f"   平均奖励: {mean_reward:+.1f}")
+
     env.close()
+    print("\n✅ 训练流程结束")
+
+
+# =====================================================================
+#  单独评估（训练完后运行）
+# =====================================================================
+
+def evaluate(model_path, n_episodes=10):
+    """评估已训练模型"""
+    print(f"\n📂 加载模型: {model_path}")
+    env = TennisCollectorEnv(render_mode="human", active_half=ACTIVE_HALF)
+    model = PPO.load(model_path)
+
+    total_success = 0
+    total_reward = 0
+
+    for i in range(n_episodes):
+        obs, _ = env.reset()
+        ep_reward = 0
+        done = False
+
+        while not done:
+            action, _ = model.predict(obs, deterministic=True)
+            obs, reward, terminated, truncated, info = env.step(action)
+            ep_reward += reward
+            done = terminated or truncated
+
+        if info.get('success', False):
+            total_success += 1
+
+        total_reward += ep_reward
+        print(f"  Ep {i+1}: R={ep_reward:+.1f} | "
+              f"reason={info.get('reason', '?')} | "
+              f"成功={info.get('success', False)}")
+
+    print(f"\n🏁 评估完成")
+    print(f"   成功率: {total_success}/{n_episodes} = {total_success/n_episodes*100:.1f}%")
+    print(f"   平均奖励: {total_reward/n_episodes:+.1f}")
+
+    env.close()
+
+
+# =====================================================================
+#  继续训练（从检查点恢复）
+# =====================================================================
+
+def resume_training(checkpoint_path, additional_timesteps=200_000):
+    """从已保存的检查点继续训练"""
+    print(f"📂 加载模型: {checkpoint_path}")
+    env = TennisCollectorEnv(render_mode=None, active_half=ACTIVE_HALF)
+    env = Monitor(env)
+
+    model = PPO.load(checkpoint_path, env=env)
+
+    checkpoint_cb = CheckpointCallback(
+        save_freq=SAVE_FREQ,
+        save_path=MODEL_DIR,
+        name_prefix="ppo_tennis_resume",
+        verbose=1,
+    )
+    log_cb = TrainingLogCallback()
+
+    print(f"🚀 继续训练 {additional_timesteps:,} 步...")
+    try:
+        model.learn(
+            total_timesteps=additional_timesteps,
+            callback=CallbackList([checkpoint_cb, log_cb]),
+            reset_num_timesteps=False,
+        )
+    except KeyboardInterrupt:
+        print("\n⚠️ 用户中断")
+
+    model.save(os.path.join(FINAL_MODEL_DIR, "ppo_tennis_resumed"))
+    env.close()
+    print("✅ 继续训练完成")
+
+
+# =====================================================================
+#  入口
+# =====================================================================
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) > 1:
+        cmd = sys.argv[1]
+        if cmd == "eval":
+            model_path = sys.argv[2] if len(sys.argv) > 2 else "./models/final/ppo_tennis_final.zip"
+            evaluate(model_path, n_episodes=10)
+        elif cmd == "resume":
+            ckpt = sys.argv[2] if len(sys.argv) > 2 else "./models/final/ppo_tennis_final.zip"
+            resume_training(ckpt)
+        else:
+            print(f"未知命令: {cmd}")
+            print("用法:")
+            print("  python train_ppo.py              # 开始训练")
+            print("  python train_ppo.py eval <模型>   # 评估模型")
+            print("  python train_ppo.py resume <模型> # 继续训练")
+    else:
+        train()
