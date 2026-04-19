@@ -14,7 +14,5 @@ regex==2026.3.32
 tqdm==4.67.3
 rich==14.3.3
 wcwidth==0.6.0
-# python -c "import gymnasium; import stable_baselines3; print('安装成功')"
-
 
 # pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
