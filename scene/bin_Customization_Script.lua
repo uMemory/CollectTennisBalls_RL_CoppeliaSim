@@ -169,8 +169,17 @@ end
 --
 -- Returns: actual generated count
 -- ============================================================
-function spawnBalls(ball_count, seed)
+function spawnBalls(inInts, inFloats, inStrings, inBuffer)
     _ensureInit()
+
+    local ball_count, seed
+    if type(inInts) == "table" then
+        ball_count = inInts[1]
+        seed       = inInts[2]
+    else
+        ball_count = inInts
+        seed       = inFloats   -- ????????
+    end
 
     ball_count = (ball_count and ball_count > 0) and ball_count or 12
     seed       = (seed and seed > 0) and seed or os.time()
@@ -189,5 +198,5 @@ function spawnBalls(ball_count, seed)
     end
 
     print(string.format("spawnBalls completed: %d balls", ball_count))
-    return ball_count
+    return {ball_count}, {}, {}, ''
 end

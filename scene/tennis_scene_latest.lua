@@ -373,6 +373,8 @@ end
 --  ⑥ 长椅
 -- ══════════════════════════════════════════════════════════════
 local function makeBench(idx, x, y)
+-- backDir: bench back faces away from court center (outward)
+    local backDir = (y < 0) and -1 or 1
     box(string.format("Bench_Seat_%d", idx),
         {x, y, 0.45}, {1.5, 0.40, 0.05}, C.bench, true)
     box(string.format("Bench_Leg1_%d", idx),
@@ -380,7 +382,7 @@ local function makeBench(idx, x, y)
     box(string.format("Bench_Leg2_%d", idx),
         {x + 0.55, y, 0.22}, {0.05, 0.38, 0.44}, C.bench, true)
     box(string.format("Bench_Back_%d", idx),
-        {x, y - 0.18, 0.70}, {1.5, 0.04, 0.45}, C.bench, true)
+        {x, y + backDir * 0.18, 0.70}, {1.5, 0.04, 0.45}, C.bench, true)
 end
 
 makeBench(1,  0, -OW/2 + 0.8)
