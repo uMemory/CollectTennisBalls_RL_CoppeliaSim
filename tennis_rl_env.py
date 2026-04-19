@@ -73,7 +73,7 @@ MAX_STEPS        = 500
 ACTION_REPEAT    = 4
 FRAME_STACK      = 3
 SINGLE_OBS_DIM   = 10
-ELIM_DIST        = 0.38     # 消除阈值距离
+ELIM_DIST        = 0.40     # 消除阈值距离
 BALL_RADIUS      = 0.1
 BALL_COUNT       = 12
 
@@ -164,7 +164,7 @@ class TennisCollectorEnv(gym.Env):
             self.sim.setStepping(True)
             print("▶️  仿真已在运行，已切换到 stepping 模式")
 
-        # 等几步让仿真稳定
+        # 等几步，让仿真稳定
         for _ in range(10):
             self.sim.step()
         time.sleep(0.3)
@@ -191,7 +191,7 @@ class TennisCollectorEnv(gym.Env):
         )
         print("✅ BallSpawner 脚本句柄已就绪")
         print(f"✅ 连接成功 | 初始姿态 ori={[f'{v:.3f}' for v in self._default_ori]}")
-        print(f"   初始位置 pos={[f'{v:.3f}' for v in self._default_pos]}")
+        print(f"初始位置 pos={[f'{v:.3f}' for v in self._default_pos]}")
 
     # =================================================================
     #  电机控制
@@ -289,16 +289,37 @@ class TennisCollectorEnv(gym.Env):
     #  球可达性判断
     # =================================================================
 
-    def _estimate_ball_reachable(self, ball_angle_norm, ball_area, robot_x, robot_yaw):
-        ball_angle_rad = ball_angle_norm * (SENSOR_FOV / 2)
+    def _estimate_ball_world_pos(self, ball_angle_norm, ball_area, robot_x, robot_y, robot_yaw):
+        """
+        根据像素偏角和面积估计球在世界系下的 (bx, by)。
+
+        角度公式使用精确反三角（atan），替代原来的小角度近似
+        ball_angle_rad ≈ angle_norm * FOV/2（边缘误差 ~20%）。
+
+        返回 (est_bx, est_by, est_dist)
+        """
+        tan_half_fov = math.tan(SENSOR_FOV / 2)
+        ball_angle_rad = math.atan(ball_angle_norm * tan_half_fov)
         ball_world_angle = robot_yaw + ball_angle_rad
         est_dist = self._estimate_distance_from_area(ball_area)
         est_bx = robot_x + est_dist * math.cos(ball_world_angle)
+        est_by = robot_y + est_dist * math.sin(ball_world_angle)
+        return est_bx, est_by, est_dist
 
+    def _ball_in_active_half(self, est_bx, strict=False):
+        """
+        判断估计球位置是否在活跃半场。
+
+        strict=True  : 严格半场内（est_bx > 0 for X>0 half）
+                       用于观察过滤，彻底排除对面球的干扰。
+        strict=False : 容忍 0.5m 的距离估计误差（est_bx > -0.5）
+                       用于 ball_reachable 可达标志，避免误杀网边的球。
+        """
+        margin = 0.0 if strict else 0.5
         if self.active_half > 0:
-            return 1.0 if est_bx > -0.5 else 0.0
+            return est_bx > -margin
         else:
-            return 1.0 if est_bx < 0.5 else 0.0
+            return est_bx < margin
 
     # =================================================================
     #  几何工具
@@ -328,22 +349,45 @@ class TennisCollectorEnv(gym.Env):
         rx, ry, ryaw = self._get_youbot_pose()
 
         img_bgr = self._get_rgb_image()
-        balls = self._detect_balls_in_image(img_bgr)
+        balls_all = self._detect_balls_in_image(img_bgr)
+
+        # ── 按活跃半场严格过滤（排除对面半场的球，避免观察污染）──
+        # 同时记录每个球的估计世界坐标，后续复用
+        balls_filtered = []
+        for b in balls_all:
+            est_bx, est_by, est_dist = self._estimate_ball_world_pos(
+                b['angle_norm'], b['area'], rx, ry, ryaw
+            )
+            b['est_bx'] = est_bx
+            b['est_by'] = est_by
+            b['est_dist'] = est_dist
+            if self._ball_in_active_half(est_bx, strict=True):
+                balls_filtered.append(b)
+
+        # 用于 debug 渲染：标记哪些被过滤掉了
+        self._last_balls_all = balls_all
+        self._last_balls_filtered = balls_filtered
 
         if self.render_mode == "human":
-            self._render_debug(img_bgr, balls)
+            self._render_debug(img_bgr, balls_all)
 
         total_pixels = SENSOR_RES * CROPPED_HEIGHT
 
-        if len(balls) > 0:
-            nearest = balls[0]
+        # ── 语义区分（用于奖励）──
+        # any_ball_visible : 视野里看到任何球（包括对面半场）
+        # ball_in_half     : 过滤后有活跃半场内的球
+        any_ball_visible = len(balls_all) > 0
+        ball_in_half = len(balls_filtered) > 0
+
+        if ball_in_half:
+            # 在活跃半场内的球中取面积最大（最近）的一个
+            nearest = balls_filtered[0]
             ball_detected = 1.0
-            ball_angle = np.clip(nearest['angle_norm'], -1.0, 1.0)
-            ball_size = np.clip(nearest['area'] / (total_pixels * NORM_AREA), 0.0, 1.0)
-            ball_count = np.clip(len(balls) / NORM_COUNT, 0.0, 1.0)
-            ball_reachable = self._estimate_ball_reachable(
-                nearest['angle_norm'], nearest['area'], rx, ryaw
-            )
+            ball_angle = float(np.clip(nearest['angle_norm'], -1.0, 1.0))
+            ball_size = float(np.clip(nearest['area'] / (total_pixels * NORM_AREA), 0.0, 1.0))
+            ball_count = float(np.clip(len(balls_filtered) / NORM_COUNT, 0.0, 1.0))
+            # 用宽松判据给 reachable 标志（容忍估计误差）
+            ball_reachable = 1.0 if self._ball_in_active_half(nearest['est_bx'], strict=False) else 0.0
         else:
             ball_detected = 0.0
             ball_angle = 0.0
@@ -370,6 +414,8 @@ class TennisCollectorEnv(gym.Env):
             'ball_angle': ball_angle,
             'ball_size': ball_size,
             'ball_is_reachable': ball_reachable > 0.5,
+            'any_ball_visible': any_ball_visible,       # 含对面半场
+            'ball_in_half': ball_in_half,               # 仅活跃半场
             'net_distance': self._net_distance(rx),
             'dist_to_boundary': self._dist_to_nearest_boundary(rx, ry),
         }
@@ -399,20 +445,27 @@ class TennisCollectorEnv(gym.Env):
         if not is_moving:
             reward -= 1.0
 
-        ball_det = curr['ball_detected']
-        prev_det = (self.prev_obs_single is not None and
-                    self.prev_obs_single['ball_detected'])
+        # ── 视觉引导奖励 ──
+        # 三种情况严格区分：
+        #   (a) 看到活跃半场内的球（ball_in_half=True）→ 给正向引导
+        #   (b) 视野里只有对面半场的球（any_ball_visible && !ball_in_half）→ 强惩罚 -0.5
+        #       鼓励 agent 主动转头换视野
+        #   (c) 完全看不到任何球 → 轻惩罚 -0.3
+        ball_in_half = curr['ball_in_half']
+        any_visible = curr['any_ball_visible']
+        prev_in_half = (self.prev_obs_single is not None and
+                        self.prev_obs_single.get('ball_in_half', False))
 
-        if ball_det:
-            if curr['ball_is_reachable']:
-                if is_moving:
-                    reward += 0.5
-                    reward += 1.0 * (1.0 - abs(curr['ball_angle']))
-                    if prev_det and self.prev_obs_single.get('ball_is_reachable', False):
-                        delta_size = curr['ball_size'] - self.prev_obs_single['ball_size']
-                        reward += 5.0 * delta_size
-            else:
-                reward -= 0.2
+        if ball_in_half:
+            if is_moving:
+                reward += 0.5
+                reward += 1.0 * (1.0 - abs(curr['ball_angle']))
+                if prev_in_half:
+                    delta_size = curr['ball_size'] - self.prev_obs_single['ball_size']
+                    reward += 5.0 * delta_size
+        elif any_visible:
+            # 视野里只有对面半场的球 —— 比"完全没看到"更糟
+            reward -= 0.5
         else:
             reward -= 0.3
 
@@ -458,6 +511,8 @@ class TennisCollectorEnv(gym.Env):
                 if dist < ELIM_DIST:
                     self.sim.removeObjects([h])
                     del self.current_ball_handles[name]
+                    # 让仿真器把删除事件消化掉,再返回
+                    self.sim.step()
                     print(f"  💥 消除 {name} (dist={dist:.3f}m)")
                     return True
             except Exception:
@@ -503,8 +558,7 @@ class TennisCollectorEnv(gym.Env):
         else:
             rx = np.random.uniform(-HALF_COURT_X_MAX + 1.0, -2.0)
         ry = np.random.uniform(-HALF_COURT_Y_MAX + 1.0, HALF_COURT_Y_MAX - 1.0)
-        rz = self._default_pos[2]  # 使用初始高度，不硬编码
-
+        rz = self._default_pos[2]  # 使用初始高度
         # 设置位置
         self.sim.setObjectPosition(
             self.youbot_h, [rx, ry, rz], self.sim.handle_world
@@ -590,12 +644,12 @@ class TennisCollectorEnv(gym.Env):
             total = self._count_total_balls()
             if total == 0:
                 # 全场无球 → 重新生成
-                print("⚠️  全场无球，重新生成网球...")
+                print("⚠️ 全场无球，重新生成网球...")
                 self._respawn_balls(ball_count=BALL_COUNT)
             else:
                 # 当前半场无球但对面有球 → 切换半场
                 self.active_half = -self.active_half
-                print(f"⚠️  当前半场无球，切换到 {'X>0' if self.active_half > 0 else 'X<0'} 半场继续训练")
+                print(f"⚠️ 当前半场无球，切换到 {'X>0' if self.active_half > 0 else 'X<0'} 半场继续训练")
 
         self._reset_youbot()
 
@@ -652,7 +706,12 @@ class TennisCollectorEnv(gym.Env):
             info['success'] = False
             info['reason'] = 'timeout'
 
-        if self._last_raw['dist_to_boundary'] < 0.3:
+        # ── Stuck 判据：加"位移小"与条件，避免追球途经边界/网被误判 ──
+        # 当前步位移（相对上一步）
+        step_displacement = math.hypot(rx - self.prev_robot_x, ry - self.prev_robot_y)
+        is_actually_stuck = step_displacement < 0.05
+
+        if self._last_raw['dist_to_boundary'] < 0.3 and is_actually_stuck:
             self.stuck_boundary_count += 1
         else:
             self.stuck_boundary_count = 0
@@ -662,7 +721,7 @@ class TennisCollectorEnv(gym.Env):
             info['success'] = False
             info['reason'] = 'stuck_at_boundary'
 
-        if self._last_raw['net_distance'] < 0.3:
+        if self._last_raw['net_distance'] < 0.3 and is_actually_stuck:
             self.stuck_net_count += 1
         else:
             self.stuck_net_count = 0
@@ -693,7 +752,7 @@ class TennisCollectorEnv(gym.Env):
         通过 callScriptFunction 调用挂载在 Bin_Base 上的spawnBalls() Lua 函数，
         重新生成网球。seed=0 表示基于时间随机（由 Lua 端处理）。
         """
-        print(f"  🔄全场无球，调用 Lua spawnBalls({ball_count}, seed={seed})...")
+        print(f"🔄全场无球，调用 Lua spawnBalls({ball_count}, seed={seed})...")
         try:
             ret = self.sim.callScriptFunction(
                 'spawnBalls',  # 函数名
@@ -705,9 +764,9 @@ class TennisCollectorEnv(gym.Env):
             )
             # ret = (outInts, outFloats, outStrings, outBuffer)
             actual_count = ret[0][0] if ret and ret[0] else ball_count
-            print(f"  ✅ 网球重生成完毕，共 {actual_count} 个")
+            print(f"✅ 网球重生成完毕，共 {actual_count} 个")
         except Exception as e:
-            print(f"  ❌ spawnBalls 调用失败: {e}")
+            print(f"❌ spawnBalls 调用失败: {e}")
 
         # 等待物理引擎稳定后刷新句柄
         for _ in range(5):
