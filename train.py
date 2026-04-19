@@ -28,12 +28,11 @@ import time
 import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import (
-    CheckpointCallback,
     BaseCallback,
     CallbackList,
 )
 from stable_baselines3.common.monitor import Monitor
-
+from async_saver import AsyncModelSaver
 from tennis_rl_env import TennisCollectorEnv
 
 
@@ -72,7 +71,7 @@ CHECKPOINT_DIR  = "./models/checkpoints"
 FINAL_MODEL_DIR = "./models/final"
 BEST_MODEL_DIR  = "./models/best_model"
 SAVE_FREQ       = 10_000
-BEST_MODEL_SAVE_FREQ = 5000
+BEST_MODEL_SAVE_FREQ = 6007
 BEST_MODEL_WINDOW    = 50     # 计算滚动平均奖励的窗口大小（episode 数）
 LOG_STATE_PATH  = "./models/train_log_state.json"  # TrainingLogCallback 的持久化状态
 
@@ -160,7 +159,7 @@ class BestModelCallback(BaseCallback):
     不是本次 learn() 内的最佳。
     """
 
-    def __init__(self, save_path, check_freq=5000, window_size=50, verbose=1):
+    def __init__(self, save_path, saver, check_freq=5000, window_size=50, verbose=1):
         super().__init__(verbose)
         self.save_path = save_path
         self.check_freq = check_freq
@@ -171,6 +170,7 @@ class BestModelCallback(BaseCallback):
         # 磁盘里最佳指标记录文件
         self._meta_path = os.path.join(save_path, "best_model_meta.json")
         self._load_best_from_disk()
+        self.saver = saver
 
     def _load_best_from_disk(self):
         """若磁盘上存在 meta，则恢复历史最佳指标"""
@@ -211,12 +211,37 @@ class BestModelCallback(BaseCallback):
                 if mean_r > self.best_mean_reward:
                     self.best_mean_reward = mean_r
                     best_path = os.path.join(self.save_path, "best_model")
-                    self.model.save(best_path)
+                    self.saver.submit(self.model, best_path)
                     self._save_best_to_disk(mean_r)
                     if self.verbose:
                         print(f"🏆 新最佳模型已保存 | "
                               f"最近{self.window_size}局 mean_reward={mean_r:+.2f} "
                               f"(step={self.num_timesteps})")
+        return True
+
+# =====================================================================
+#  异步保存检查点，解决 [sandboxScript:info] Simulation suspended. + No such function: _*executed*_ 报错
+# =====================================================================
+class AsyncCheckpointCallback(BaseCallback):
+    """替代 SB3 的 CheckpointCallback，走后台异步保存。"""
+
+    def __init__(self, save_freq, save_path, name_prefix, saver, verbose=1):
+        super().__init__(verbose)
+        self.save_freq = save_freq
+        self.save_path = save_path
+        self.name_prefix = name_prefix
+        self.saver = saver
+        os.makedirs(save_path, exist_ok=True)
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.save_freq == 0:
+            path = os.path.join(
+                self.save_path,
+                f"{self.name_prefix}_{self.num_timesteps}_steps",
+            )
+            self.saver.submit(self.model, path)
+            if self.verbose:
+                print(f"📤 [ckpt] 已提交异步保存: {path}.zip")
         return True
 
 
@@ -225,6 +250,8 @@ class BestModelCallback(BaseCallback):
 # =====================================================================
 
 def train():
+    formatted = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    print(formatted)
     print("=" * 60)
     print("  PPO 训练：半场捡网球 RL Agent")
     print("=" * 60)
@@ -283,20 +310,24 @@ def train():
     )
     n_params = sum(p.numel() for p in model.policy.parameters())
     print(f"✅ PPO 模型创建完成 | 参数量: {n_params:,}")
+    saver = AsyncModelSaver(max_queue=4, verbose=1)
 
     # ── 回调 ──
-    checkpoint_cb = CheckpointCallback(
+    checkpoint_cb = AsyncCheckpointCallback(
         save_freq=SAVE_FREQ,
         save_path=CHECKPOINT_DIR,
         name_prefix="ppo_tennis",
+        saver=saver,
         verbose=1,
     )
     best_model_cb = BestModelCallback(
         save_path=BEST_MODEL_DIR,
+        saver=saver,
         check_freq=BEST_MODEL_SAVE_FREQ,
         window_size=BEST_MODEL_WINDOW,
         verbose=1,
     )
+
     log_cb = TrainingLogCallback()
     callbacks = CallbackList([checkpoint_cb, best_model_cb, log_cb])
 
@@ -337,6 +368,7 @@ def train():
         print(f"成功率: {success_rate:.1f}%")
         print(f"平均奖励: {mean_reward:+.1f}")
 
+    saver.close(timeout=60)
     env.close()
     print("\n✅ 训练流程结束")
 
@@ -386,20 +418,24 @@ def evaluate(model_path, n_episodes=10):
 
 def resume_training(checkpoint_path, additional_timesteps=250_000):
     """从已保存的检查点继续训练"""
+    formatted = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    print(formatted)
     print(f"📂 加载模型: {checkpoint_path}")
     env = TennisCollectorEnv(render_mode=None, active_half=ACTIVE_HALF)
     env = Monitor(env)
 
     model = PPO.load(checkpoint_path, env=env, device='cpu')
-
-    checkpoint_cb = CheckpointCallback(
+    saver = AsyncModelSaver(max_queue=4, verbose=1)
+    checkpoint_cb = AsyncCheckpointCallback(
         save_freq=SAVE_FREQ,
         save_path=CHECKPOINT_DIR,
         name_prefix="ppo_tennis",
+        saver=saver,
         verbose=1,
     )
     best_model_cb = BestModelCallback(
         save_path=BEST_MODEL_DIR,
+        saver=saver,
         check_freq=BEST_MODEL_SAVE_FREQ,
         window_size=BEST_MODEL_WINDOW,
         verbose=1,
@@ -436,6 +472,8 @@ def resume_training(checkpoint_path, additional_timesteps=250_000):
         print(f"成功率: {success_rate:.1f}%")
         print(f"平均奖励: {mean_reward:+.1f}")
 
+    print("⏳ 等待后台保存线程 flush...")
+    saver.close(timeout=60)
     env.close()
     print("\n✅ 继续训练流程结束")
 
@@ -462,3 +500,5 @@ if __name__ == "__main__":
             print("python train_ppo.py resume <模型> # 继续训练")
     else:
         train()
+
+
