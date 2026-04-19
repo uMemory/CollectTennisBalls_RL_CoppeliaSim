@@ -110,7 +110,7 @@ class TrainingLogCallback(BaseCallback):
                     min_r = np.min(recent)
                     success_rate = self.success_count / self.episode_count * 100
                     print(
-                        f"  📊 Ep {self.episode_count:5d} | "
+                        f"[train] Ep {self.episode_count:5d} | "
                         f"最近10局 mean={mean_r:+.1f} "
                         f"max={max_r:+.1f} min={min_r:+.1f} | "
                         f"成功率 {success_rate:.1f}% | "
@@ -133,7 +133,7 @@ class TrainingLogCallback(BaseCallback):
         """从磁盘加载上次训练的累积统计状态"""
         import json
         if not os.path.exists(path):
-            print(f"ℹ️ 未找到累积统计文件 {path}，从零开始计数")
+            print(f"[train] 未找到累积统计文件 {path}，从零开始计数")
             return False
         with open(path, 'r') as f:
             state = json.load(f)
@@ -141,7 +141,7 @@ class TrainingLogCallback(BaseCallback):
         self.episode_rewards = state.get('episode_rewards', [])
         self.success_count = state.get('success_count', 0)
         sr = self.success_count / self.episode_count * 100 if self.episode_count else 0
-        print(f"  ✅ 已继承上次统计: Ep={self.episode_count} "
+        print(f"[train] 已继承上次统计: Ep={self.episode_count} "
               f"成功={self.success_count} 成功率={sr:.1f}%")
         return True
 
@@ -181,9 +181,9 @@ class BestModelCallback(BaseCallback):
                     meta = json.load(f)
                 self.best_mean_reward = meta.get('best_mean_reward', -np.inf)
                 if self.verbose:
-                    print(f"✅ 已加载历史最佳指标: mean_reward={self.best_mean_reward:+.2f}")
+                    print(f"[train] 已加载历史最佳指标: mean_reward={self.best_mean_reward:+.2f}")
             except Exception as e:
-                print(f"⚠️ 历史最佳 meta 读取失败: {e}")
+                print(f"[train] 历史最佳 meta 读取失败: {e}")
 
     def _save_best_to_disk(self, mean_reward):
         import json
@@ -214,7 +214,7 @@ class BestModelCallback(BaseCallback):
                     self.saver.submit(self.model, best_path)
                     self._save_best_to_disk(mean_r)
                     if self.verbose:
-                        print(f"🏆 新最佳模型已保存 | "
+                        print(f"[train] 新最佳模型已保存 | "
                               f"最近{self.window_size}局 mean_reward={mean_r:+.2f} "
                               f"(step={self.num_timesteps})")
         return True
@@ -253,21 +253,20 @@ def train():
     formatted = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     print(formatted)
     print("=" * 60)
-    print("  PPO 训练：半场捡网球 RL Agent")
-    print("=" * 60)
-    print(f" 半场: {'X>0' if ACTIVE_HALF > 0 else 'X<0'}")
-    print(f" 总步数: {TOTAL_TIMESTEPS:,}")
-    print(f" 学习率: {LEARNING_RATE}")
-    print(f" 网络: pi={POLICY_KWARGS['net_arch']['pi']} "
+    print("[train]  PPO 训练：半场捡网球 RL Agent")
+    print(f"[train] 半场: {'X>0' if ACTIVE_HALF > 0 else 'X<0'}")
+    print(f"[train] 总步数: {TOTAL_TIMESTEPS:,}")
+    print(f"[train] 学习率: {LEARNING_RATE}")
+    print(f"[train] 网络: pi={POLICY_KWARGS['net_arch']['pi']} "
           f"vf={POLICY_KWARGS['net_arch']['vf']}")
     print("=" * 60)
     print()
-    print("√ 前置检查清单：")
-    print("√ CoppeliaSim 已打开并加载场景")
-    print("√ 网球已生成（场上可见黄绿色小球）")
-    print("√ 仿真已点 Play ▶️ 处于运行状态")
+    print("[train] 前置检查清单：")
+    print("[train] CoppeliaSim 已打开并加载场景")
+    print("[train] 网球已生成（场上可见黄绿色小球）")
+    print("[train] 仿真已点 Play ▶ 处于运行状态")
     print()
-    input(" 确认以上条件后按 Enter 开始训练...")
+    input("[train] 确认以上条件后按 Enter 开始训练...")
 
     # 创建目录
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -279,16 +278,16 @@ def train():
     # ── 创建单个训练环境 ──
     # 不使用 DummyVecEnv 包装，因为会引入不必要的额外初始化
     # 也不使用 eval_env，避免双环境冲突 ZMQ 连接
-    print("\n⏳ 正在连接 CoppeliaSim 并创建环境...")
+    print("\n[train] 正在连接 CoppeliaSim 并创建环境...")
     env = TennisCollectorEnv(
         render_mode=None,    # 训练时关闭可视化，加速
         active_half=ACTIVE_HALF,
     )
     env = Monitor(env)  # 包装一层 Monitor 以便统计 episode 信息
-    print("✅ 环境就绪")
+    print("[train] 环境就绪")
 
     # ── 创建 PPO 模型 ──
-    print("\n⏳ 正在创建 PPO 模型...")
+    print("\n[train] 正在创建 PPO 模型...")
     model = PPO(
         policy="MlpPolicy", # 针对这个网络结构（非 CNN），用 CPU 训练通常会更快、更高效。
         env=env,
@@ -309,7 +308,7 @@ def train():
         device='cpu'
     )
     n_params = sum(p.numel() for p in model.policy.parameters())
-    print(f"✅ PPO 模型创建完成 | 参数量: {n_params:,}")
+    print(f"[train] PPO 模型创建完成 | 参数量: {n_params:,}")
     saver = AsyncModelSaver(max_queue=4, verbose=1)
 
     # ── 回调 ──
@@ -332,9 +331,9 @@ def train():
     callbacks = CallbackList([checkpoint_cb, best_model_cb, log_cb])
 
     # ── 开始训练 ──
-    print("\n🚀 开始训练...")
-    print(f"TensorBoard: tensorboard --logdir {LOG_DIR}")
-    print(f"按 Ctrl+C 可随时中断并保存当前模型\n")
+    print("\n[train] 开始训练...")
+    print(f"[train] TensorBoard: tensorboard --logdir {LOG_DIR}")
+    print(f"[train] 按 Ctrl+C 可随时中断并保存当前模型\n")
 
     try:
         model.learn(
@@ -343,34 +342,34 @@ def train():
             progress_bar=False,   # progress_bar 可能与某些终端冲突
         )
     except KeyboardInterrupt:
-        print("\n\n⚠️ 用户中断训练")
+        print("\n\n[train] 用户中断训练")
     except Exception as e:
-        print(f"\n\n❌ 训练异常: {e}")
+        print(f"\n\n[train] 训练异常: {e}")
         import traceback
         traceback.print_exc()
 
     # ── 保存最终模型 ──
     final_path = os.path.join(FINAL_MODEL_DIR, "ppo_tennis_final")
     model.save(final_path)
-    print(f"\n💾 最终模型已保存: {final_path}.zip")
+    print(f"\n[train] 最终模型已保存: {final_path}.zip")
 
     # ── 保存日志回调的累积状态（供 resume 继承）──
     log_cb.save_state(LOG_STATE_PATH)
-    print(f"💾 训练统计已保存: {LOG_STATE_PATH}")
+    print(f"[train] 训练统计已保存: {LOG_STATE_PATH}")
 
     # ── 训练统计 ──
     if log_cb.episode_count > 0:
         success_rate = log_cb.success_count / log_cb.episode_count * 100
         mean_reward = np.mean(log_cb.episode_rewards) if log_cb.episode_rewards else 0
-        print(f"\n📈 训练统计:")
-        print(f"总 Episode 数: {log_cb.episode_count}")
-        print(f"成功消除: {log_cb.success_count} 次")
-        print(f"成功率: {success_rate:.1f}%")
-        print(f"平均奖励: {mean_reward:+.1f}")
+        print(f"\n[train] 训练统计:")
+        print(f"[train] 总 Episode 数: {log_cb.episode_count}")
+        print(f"[train] 成功消除: {log_cb.success_count} 次")
+        print(f"[train] 成功率: {success_rate:.1f}%")
+        print(f"[train] 平均奖励: {mean_reward:+.1f}")
 
     saver.close(timeout=60)
     env.close()
-    print("\n✅ 训练流程结束")
+    print("\n[train] 训练流程结束")
 
 
 # =====================================================================
@@ -379,7 +378,7 @@ def train():
 
 def evaluate(model_path, n_episodes=10):
     """评估已训练模型"""
-    print(f"\n📂 加载模型: {model_path}")
+    print(f"\n[train] 加载模型: {model_path}")
     env = TennisCollectorEnv(render_mode="human", active_half=ACTIVE_HALF)
     model = PPO.load(model_path, device='cpu')
 
@@ -405,9 +404,9 @@ def evaluate(model_path, n_episodes=10):
               f"reason={info.get('reason', '?')} | "
               f"成功={info.get('success', False)}")
 
-    print(f"\n🏁 评估完成")
-    print(f"成功率: {total_success}/{n_episodes} = {total_success/n_episodes*100:.1f}%")
-    print(f"平均奖励: {total_reward/n_episodes:+.1f}")
+    print(f"\n[train] 评估完成")
+    print(f"[train] 成功率: {total_success}/{n_episodes} = {total_success/n_episodes*100:.1f}%")
+    print(f"[train] 平均奖励: {total_reward/n_episodes:+.1f}")
 
     env.close()
 
@@ -416,11 +415,11 @@ def evaluate(model_path, n_episodes=10):
 #  继续训练（从检查点恢复）
 # =====================================================================
 
-def resume_training(checkpoint_path, additional_timesteps=250_000):
+def resume_training(checkpoint_path, additional_timesteps=290_000):
     """从已保存的检查点继续训练"""
     formatted = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
     print(formatted)
-    print(f"📂 加载模型: {checkpoint_path}")
+    print(f"[train] 加载模型: {checkpoint_path}")
     env = TennisCollectorEnv(render_mode=None, active_half=ACTIVE_HALF)
     env = Monitor(env)
 
@@ -444,7 +443,7 @@ def resume_training(checkpoint_path, additional_timesteps=250_000):
     # 继承上次训练的累积统计（episode_count / success_count / episode_rewards）
     log_cb.load_state(LOG_STATE_PATH)
 
-    print(f"🚀 继续训练 {additional_timesteps:,} 步...")
+    print(f"[train] 继续训练 {additional_timesteps:,} 步...")
     try:
         model.learn(
             total_timesteps=additional_timesteps,
@@ -452,30 +451,30 @@ def resume_training(checkpoint_path, additional_timesteps=250_000):
             reset_num_timesteps=False,
         )
     except KeyboardInterrupt:
-        print("\n⚠️ 用户中断")
+        print("\n[train] 用户中断")
 
     final_path = os.path.join(FINAL_MODEL_DIR, "ppo_tennis_resumed")
     model.save(final_path)
-    print(f"\n💾 最终模型已保存: {final_path}.zip")
+    print(f"\n[train] 最终模型已保存: {final_path}.zip")
 
     # 保存日志回调的累积状态（供下次 resume 继续继承）
     log_cb.save_state(LOG_STATE_PATH)
-    print(f"💾 训练统计已保存: {LOG_STATE_PATH}")
+    print(f"[train] 训练统计已保存: {LOG_STATE_PATH}")
 
     # 打印训练统计（和普通训练一样）
     if log_cb.episode_count > 0:
         success_rate = log_cb.success_count / log_cb.episode_count * 100
         mean_reward = np.mean(log_cb.episode_rewards) if log_cb.episode_rewards else 0
-        print(f"\n📈 训练统计:")
-        print(f"总 Episode 数: {log_cb.episode_count}")
-        print(f"成功消除: {log_cb.success_count} 次")
-        print(f"成功率: {success_rate:.1f}%")
-        print(f"平均奖励: {mean_reward:+.1f}")
+        print(f"\n[train] 训练统计:")
+        print(f"[train] 总 Episode 数: {log_cb.episode_count}")
+        print(f"[train] 成功消除: {log_cb.success_count} 次")
+        print(f"[train] 成功率: {success_rate:.1f}%")
+        print(f"[train] 平均奖励: {mean_reward:+.1f}")
 
-    print("⏳ 等待后台保存线程 flush...")
+    print("[train] 等待后台保存线程 flush...")
     saver.close(timeout=60)
     env.close()
-    print("\n✅ 继续训练流程结束")
+    print("\n[train] 继续训练流程结束")
 
 # =====================================================================
 #  入口
