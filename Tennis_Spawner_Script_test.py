@@ -22,9 +22,6 @@ def test_spawn_balls():
         return
 
     # 调用 spawnBalls
-    # ZMQ Remote API 的 callScriptFunction 签名:
-    #   sim.callScriptFunction(funcName, scriptHandle, arg1, arg2, ...)
-    # 直接传参数，不再拆分成 inInts/inFloats/inStrings/inBuffer
     print("\n正在调用 spawnBalls(count=12, seed=0)...")
     try:
         result = sim.callScriptFunction(
@@ -45,10 +42,10 @@ def test_spawn_balls():
         try:
             h = sim.getObject(f'/{name}')
             pos = sim.getObjectPosition(h, sim.handle_world)
-            print(f"  ✅ {name}: x={pos[0]:.2f}, y={pos[1]:.2f}, z={pos[2]:.2f}")
+            print(f"✅ {name}: x={pos[0]:.2f}, y={pos[1]:.2f}, z={pos[2]:.2f}")
             found += 1
         except Exception:
-            print(f"  ❌ {name}: 不存在")
+            print(f"❌ {name}: 不存在")
 
     print(f"\n{'✅ 测试通过' if found == 12 else '⚠️ 测试部分通过'} | 找到 {found}/12 个网球")
 
