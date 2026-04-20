@@ -672,6 +672,50 @@ class TennisCollectorEnv(gym.Env):
         return stacked, info
 
     # =================================================================
+    #  Gymnasium: soft_reset  （部署专用）
+    # =================================================================
+
+    def soft_reset(self):
+        """
+        部署模式专用：只重置 episode 状态，不挪动 YouBot 位置，
+        也不自动切换半场 / 重生成球。
+
+        典型用法（部署流程）：
+          第一次进入循环前调用一次 env.reset() 初始化 buffer；
+          之后每轮 RL 捡球结束后调用 env.soft_reset()，保留车的位置
+          供下一轮继续捡（或由外层规则代码接管导航）。
+
+        不做的事（与 reset 的区别）：
+          - 不调用 _reset_youbot()，YouBot 留在原位
+          - 不自动切 active_half（这个由外层 deploy 的绕网流程管）
+          - 不 respawn 球
+        """
+        self._stop()
+        self._refresh_ball_handles()
+
+        self.step_count = 0
+        self.prev_obs_single = None
+        rx, ry, _ = self._get_youbot_pose()
+        self.prev_robot_x = rx
+        self.prev_robot_y = ry
+        self.stuck_boundary_count = 0
+        self.stuck_net_count = 0
+
+        # 清空 frame buffer，用当前观察重新填满 FRAME_STACK 帧
+        first_obs = self._build_single_obs()
+        self.prev_obs_single = dict(self._last_raw)
+        self.frame_buffer.clear()
+        for _ in range(FRAME_STACK):
+            self.frame_buffer.append(first_obs.copy())
+
+        stacked = self._get_stacked_obs()
+        info = {
+            'balls_in_half': self._count_balls_in_active_half(),
+            'active_half': self.active_half,
+        }
+        return stacked, info
+
+    # =================================================================
     #  Gymnasium: step
     # =================================================================
 

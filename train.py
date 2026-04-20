@@ -392,6 +392,7 @@ def evaluate(model_path, n_episodes=10):
 
         while not done:
             action, _ = model.predict(obs, deterministic=True)
+            action = int(action)
             obs, reward, terminated, truncated, info = env.step(action)
             ep_reward += reward
             done = terminated or truncated
