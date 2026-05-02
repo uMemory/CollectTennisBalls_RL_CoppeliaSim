@@ -11,6 +11,11 @@ deploy_collector.py
       3. 巡视确认当前半场清空 → 绕网切换到另一半场
       4. 重复
 
+巡视路线：
+  - 7 个路径点覆盖半场的近网区、中场、底线
+  - 从距 YouBot 最近的点切入，不浪费路程
+  - 正向走完后原路返回，正反两方向视野覆盖所有死角
+
 用法：
   python deploy_collector.py --model ./models/best/best_model.zip
 """
@@ -21,6 +26,7 @@ import time
 import collections
 import numpy as np
 from stable_baselines3 import PPO
+from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 from tennis_rl_env import (
     TennisCollectorEnv,
     BALL_COUNT,
@@ -34,6 +40,13 @@ from tennis_rl_env import (
 # =====================================================================
 #  导航参数
 # =====================================================================
+
+# ── 绕网参数 ──
+# 场地几何约束（见 tennis_scene_latest.lua）:
+#   网柱位于 Y = ±6.40m，必须绕到 |Y| > 6.40 才能横穿 X=0
+#   椅子 1 位于 y ≈ -8.35 (占用 Y ∈ [-8.55, -7.72])
+#   椅子 2 位于 y ≈ +8.35 (占用 Y ∈ [+7.72, +8.55])
+#   安全走廊: |Y| ∈ (6.40, 7.72), 取中值 7.05 给两侧各 ~0.6m 余量
 NET_BYPASS_Y       = 7.05
 COURT_X_HALF       = 11.885
 WAYPOINT_REACHED   = 0.50
@@ -43,10 +56,17 @@ NAV_ALPHA          = 0.15
 BASE_SPEED         = 10.0
 TURN_SPEED         = 5.0
 
-
+# ── RL 捡球阶段的"原地摇头"检测参数 ──
+# 当视野里没有当前半场的球（例如球藏在车背后）时，策略倾向原地摇头，
+# 因为转头的累积惩罚（-0.4/步）比"往外冲撞边界"更小。这是一个局部最优。
+# 这里做一个部署层的兜底：若最近 STUCK_WINDOW 步内 YouBot 位置范围
+# 小于 STUCK_THRESHOLD，判定为卡住，终止 RL 循环，主动触发一次巡视
+# 来打破僵局。
 STUCK_WINDOW        = 80     # 滑动窗口长度（RL step 数），80 × 4 仿真步 ≈ 16 秒仿真
 STUCK_THRESHOLD     = 0.20   # 窗口内 X 或 Y 的最大位移范围（米），小于此值判为卡住
-POST_PATROL_GRACE   = 40
+POST_PATROL_GRACE   = 40     # 巡视中断发现球后，RL 启动的前 N 步不做卡住检测，
+                             # 避免"巡视发现球 → RL 重启位置不理想 → 又触发卡住 →
+                             # 又触发巡视"的死循环导致 ZMQ 过载崩溃
 
 
 # =====================================================================
@@ -60,7 +80,7 @@ class RuleNavigator:
         self.sim = sim
         self.youbot_h = youbot_h
         self.fl, self.fr, self.rl, self.rr = wheels
-
+        # env 可选：若传入且 render_mode=='human'，在导航过程中
         # 周期性刷新 OpenCV 调试窗口，避免窗口长时间无刷新变"无响应"
         self.env = env
 
@@ -80,7 +100,11 @@ class RuleNavigator:
         return pos[0], pos[1], yaw
 
     def _refresh_debug_window(self):
-        """导航阶段定期刷新 OpenCV 调试窗口。"""
+        """
+        导航阶段定期刷新 OpenCV 调试窗口。
+        只取图 + 检测 + 渲染，不修改 env 的 frame_buffer / prev_obs_single，
+        避免影响下一轮 RL 捡球的状态连续性。
+        """
         if self.env is None or self.env.render_mode != "human":
             return
         try:
@@ -117,7 +141,18 @@ class RuleNavigator:
 
     def navigate_to(self, tx, ty, reach_dist=WAYPOINT_REACHED, label="WP",
                     abort_check=None, abort_check_every=15):
-        """导航到目标点，返回 True=到达、False=超时、"aborted"=被 abort_check 中断。"""
+        """导航到目标点，返回 True=到达、False=超时、"aborted"=被 abort_check 中断。
+
+        注意: 仿真处于 stepping 模式（env 初始化时设置），
+        必须在循环里显式调用 sim.step() 推进仿真，
+        单靠 time.sleep 仿真不会动，server 会因超时 abort。
+
+        可选参数:
+          abort_check: 无参数回调函数，每 abort_check_every 个 sim.step() 调用一次。
+                       返回 True 时立即停车并返回 "aborted"。用于巡视时实时检测球。
+          abort_check_every: 多少次 sim.step() 检查一次（默认 15，避免 ZMQ 调用过密
+                             导致 CoppeliaSim server 过载崩溃）
+        """
         # 每 N 次 sim.step() 刷新一次调试窗口，取图有开销不能每帧都刷
         DEBUG_REFRESH_EVERY = 5
 
@@ -153,7 +188,7 @@ class RuleNavigator:
         for _ in range(3):
             self.sim.step()
         self._refresh_debug_window()
-        print(f"⚠️ {label} 导航超时")
+        print(f"  ⚠️ {label} 导航超时")
         return False
 
     # -----------------------------------------------------------------
@@ -161,7 +196,15 @@ class RuleNavigator:
     # -----------------------------------------------------------------
 
     def bypass_net(self, target_half):
-        """绕网到目标半场（+1 或 -1）。"""
+        """绕网到目标半场（+1 或 -1）。
+
+        两段式路径（以 X>0 → X<0 为例）:
+          WP1: 先纵向退到 Y=±7.05m 的安全走廊（避开椅子 Y∈[7.72,8.55]，
+               也在网柱 |Y|=6.40 之外可以横穿 X=0）
+          WP2: 横向穿越 X=0，到达目标半场内 X=±3
+          完成后当前位置在 (target_x, ±7.05)，已经在对面半场，
+          RL agent 接管后会边走边找球，比规则代码直线拉回 Y=0 更有效
+        """
         rx, ry, _ = self._get_pose()
 
         bypass_y = NET_BYPASS_Y if ry >= 0 else -NET_BYPASS_Y
@@ -175,13 +218,13 @@ class RuleNavigator:
             (target_x, bypass_y),
         ]
 
-        print(f"🔀 绕网到 {'X>0' if target_half > 0 else 'X<0'} 半场")
+        print(f"  🔀 绕网到 {'X>0' if target_half > 0 else 'X<0'} 半场")
         for i, (wx, wy) in enumerate(waypoints):
-            print(f"➡️ WP{i + 1}: ({wx:.1f}, {wy:.1f})")
+            print(f"    ➡️ WP{i + 1}: ({wx:.1f}, {wy:.1f})")
             if not self.navigate_to(wx, wy, label=f"Bypass_WP{i + 1}"):
-                print(f"❌ 绕网失败")
+                print(f"  ❌ 绕网失败")
                 return False
-        print(f"✅ 绕网完成")
+        print(f"  ✅ 绕网完成")
         return True
 
     # -----------------------------------------------------------------
@@ -191,6 +234,12 @@ class RuleNavigator:
     def _build_patrol_points(self, active_half):
         """
         构建半场 S 形巡视路径点（6 个点，覆盖三个纵深层）。
+
+        每层从一侧横扫到另一侧，层间纵向前进，形成 S 形。
+        删除了中间点（中场中央、底线中央），因为 YouBot 从 Y- 侧走到
+        Y+ 侧的直线本身就经过中央，加中间点只是多停顿、没有视野增益。
+
+        俯视图（X>0 半场为例，Y+ 在左，Y- 在右）:
 
                         Y+                      Y-
                     │                       │
@@ -230,7 +279,25 @@ class RuleNavigator:
         return points
 
     def patrol_half(self, active_half):
-        """半场巡视：S 形端点就近切入，单程走完 6 个点。"""
+        """
+        半场巡视：S 形端点就近切入，单程走完 6 个点。
+
+        步骤：
+          1. 计算 YouBot 到 S 形首端（点0）和尾端（点5）的距离
+          2. 从更近的端点开始，沿 S 形走完全部 6 个点（单程，不再往返）
+          3. 在移动过程中每隔若干仿真步检查视野里是否有当前半场的球，
+             一旦发现立即停止巡视并返回 True，交给外层的 RL 去捡
+
+        示例（从点0开始）:
+          0 → 1 → 2 → 3 → 4 → 5
+
+        示例（从点5开始，离5更近时）:
+          5 → 4 → 3 → 2 → 1 → 0
+
+        返回:
+          True  - 巡视过程中发现了当前半场的球，已中断
+          False - 走完全部点没发现球
+        """
         rx, ry, _ = self._get_pose()
         points = self._build_patrol_points(active_half)
         n = len(points)
@@ -248,13 +315,21 @@ class RuleNavigator:
 
         start_label = route[0]
         end_label = route[-1]
-        print(f"🔍 开始半场巡视（{'X>0' if active_half > 0 else 'X<0'}）")
-        print(f"S 形单程: 点#{start_label} → 点#{end_label}")
-        print(f"总导航次数: {len(route)}")
+        print(f"  🔍 开始半场巡视（{'X>0' if active_half > 0 else 'X<0'}）")
+        print(f"     S 形单程: 点#{start_label} → 点#{end_label}")
+        print(f"     总导航次数: {len(route)}")
 
         # ── 构造"发现球"的中断检查回调 ──
-        PATROL_EST_BX_MARGIN   = 1.0
-        PATROL_ABORT_CONFIRM   = 3     # 连续 3 次检测到才中断（~2.25s 仿真）
+        # 只有 env 可用时才启用；调 _build_single_obs 会刷新 frame_buffer，
+        # 巡视结束后外层会调 soft_reset 清空 buffer，所以污染不是问题
+        #
+        # 双重保险避免对面球穿帮（距离估计在"车靠网+对面球贴网"时可能误判）:
+        #   A. 严格阈值：要求球的估计世界坐标明显在己方半场内 (|est_bx| > 1.0)
+        #      而非仅仅跨过 X=0，这样网边模糊区的球不会触发中断
+        #   B. 连续确认：要求连续 PATROL_ABORT_CONFIRM 次检测都报告有球才中断，
+        #      过滤相机噪声/单帧误检
+        PATROL_EST_BX_MARGIN   = 1.0   # 方案 A：球 est_bx 到己方半场至少 1.0m
+        PATROL_ABORT_CONFIRM   = 3     # 方案 B：连续 3 次检测到才中断（~2.25s 仿真）
 
         confirm_counter = [0]  # 用 list 包一层以便闭包修改
 
@@ -263,7 +338,8 @@ class RuleNavigator:
                 return False
             try:
                 self.env._build_single_obs()
-                # 重新扫一遍 balls_all,用更严格的阈值二次过滤
+                # 默认 _build_single_obs 已经按 strict=True (est_bx > 0) 过滤
+                # 这里再重新扫一遍 balls_all,用更严格的阈值二次过滤
                 balls_all = getattr(self.env, '_last_balls_all', [])
                 active = self.env.active_half
                 has_confident_ball = False
@@ -287,7 +363,7 @@ class RuleNavigator:
 
         for step_i, pt_idx in enumerate(route):
             wx, wy = points[pt_idx]
-            print(f"   → 点#{pt_idx}: ({wx:.1f}, {wy:.1f})")
+            print(f"    → 点#{pt_idx}: ({wx:.1f}, {wy:.1f})")
             result = self.navigate_to(
                 wx, wy,
                 reach_dist=1.0,
@@ -298,10 +374,10 @@ class RuleNavigator:
                 abort_check_every=15,
             )
             if result == "aborted":
-                print(f"🎾 巡视途中发现当前半场的球，中断巡视交给 RL")
+                print(f"  🎾 巡视途中发现当前半场的球，中断巡视交给 RL")
                 return True
 
-        print(f"✅ 巡视完成（未发现球）")
+        print(f"  ✅ 巡视完成（未发现球）")
         return False
 
 
@@ -357,11 +433,11 @@ def deploy(model_path, max_rounds=30):
         # 刷新球数
         env._refresh_ball_handles()
         balls_in_half = env._count_balls_in_active_half()
-        print(f"当前半场剩余: {balls_in_half} 个球")
+        print(f"  当前半场剩余: {balls_in_half} 个球")
 
         if balls_in_half == 0:
             # 当前半场无球 → 巡视确认
-            print(f"📋 当前半场看起来已清空，执行巡视确认...")
+            print(f"  📋 当前半场看起来已清空，执行巡视确认...")
             found = navigator.patrol_half(active_half)
             if found:
                 # 巡视中途看到了球 → 下一轮主循环会自然进入 RL 捡球
@@ -382,7 +458,7 @@ def deploy(model_path, max_rounds=30):
 
                 if balls_other == 0:
                     print(f"\n🎉 两个半场都已清空！")
-                    print(f"总计收集: {total_collected} 个球")
+                    print(f"   总计收集: {total_collected} 个球")
                     break
 
                 # 绕网切换
@@ -392,7 +468,7 @@ def deploy(model_path, max_rounds=30):
                 no_ball_streak = 0
                 continue
             else:
-                print(f"⚠️ 巡视后发现还有 {balls_in_half} 个球！继续捡...")
+                print(f"  ⚠️ 巡视后发现还有 {balls_in_half} 个球！继续捡...")
                 no_ball_streak = 0
 
         # ── RL Agent 捡球 ──
@@ -451,11 +527,27 @@ def deploy(model_path, max_rounds=30):
                 x_range = max(xs) - min(xs)
                 y_range = max(ys) - min(ys)
                 if x_range < STUCK_THRESHOLD and y_range < STUCK_THRESHOLD:
-                    print(f"🌀 检测到原地摇头 "
+                    print(f"  🌀 检测到原地摇头 "
                           f"(最近 {STUCK_WINDOW} 步 Δx={x_range:.2f}m Δy={y_range:.2f}m)"
                           f"，跳出 RL 循环触发巡视")
                     stuck_triggered = True
                     break
+
+        """
+        # 未加平滑版，暂时保留
+        # ── RL Agent 捡球 ──
+        obs, info = env.soft_reset()
+        done = False
+        ep_reward = 0
+
+        while not done:
+            action, _ = model.predict(obs, deterministic=True)
+            action = int(action)
+            obs, reward, terminated, truncated, info = env.step(action)
+            ep_reward += reward
+            done = terminated or truncated
+        """
+
 
         if stuck_triggered:
             # 卡住不计入 RL 失败，直接巡视打破僵局
@@ -467,15 +559,15 @@ def deploy(model_path, max_rounds=30):
         elif info.get('success', False):
             total_collected += 1
             no_ball_streak = 0
-            print(f"✅ 捡到球！(奖励={ep_reward:+.1f}, 步数={info['step']})")
+            print(f"  ✅ 捡到球！(奖励={ep_reward:+.1f}, 步数={info['step']})")
         else:
             no_ball_streak += 1
-            print(f"❌ 未捡到 (原因={info.get('reason', '?')}, "
+            print(f"  ❌ 未捡到 (原因={info.get('reason', '?')}, "
                   f"奖励={ep_reward:+.1f}, 连续失败={no_ball_streak})")
 
         # 连续失败 → 巡视
         if no_ball_streak >= NO_BALL_THRESHOLD:
-            print(f"🔍 连续 {no_ball_streak} 次失败，触发巡视...")
+            print(f"  🔍 连续 {no_ball_streak} 次失败，触发巡视...")
             found = navigator.patrol_half(active_half)
             if found:
                 patrol_just_found_ball = True
@@ -484,7 +576,7 @@ def deploy(model_path, max_rounds=30):
     env.close()
 
     print(f"\n{'=' * 60}")
-    print(f"🏁 部署结束 | 总计收集: {total_collected} 个球")
+    print(f"  🏁 部署结束 | 总计收集: {total_collected} 个球")
     print(f"{'=' * 60}")
 
 

@@ -47,7 +47,7 @@ end
 
 -- ── 缝线网球生成器（与场景脚本中的 createTennisBall 完全一致）──
 local function createTennisBall(name, pos)
-    local R      = 0.1  --  0.0335 半径
+    local R      = 0.08  --  0.0335 半径
     local mass   = 0.057
     local seamR  = 0.0018
     local A      = 0.38
