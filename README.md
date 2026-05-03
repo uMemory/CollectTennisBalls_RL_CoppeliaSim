@@ -10,7 +10,7 @@
   <img alt="Status" src="https://img.shields.io/badge/Status-Active-success">
 </p>
 
-> **简介**：在 CoppeliaSim 真实比例（1:1）网球场内，用一台仅装备**单目摄像头(Vision Sensor)**的 KUKA YouBot 移动机器人，通过 PPO 强化学习自主完成"巡场 → 发现 → 接近 → 收集"全流程，最终成功率稳定在 **88%~92%**。
+> **简介**：在 CoppeliaSim 真实比例（1:1）网球场内，用一台仅装备 **单目摄像头(Vision Sensor)** 的 KUKA YouBot 移动机器人，通过 PPO 强化学习自主完成"巡场 → 发现 → 接近 → 收集"全流程，最终成功率稳定在 **88%~92%**。
 
 ## 📖 项目简介
 
