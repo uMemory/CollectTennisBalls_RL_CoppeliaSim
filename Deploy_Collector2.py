@@ -23,17 +23,20 @@ deploy_collector.py
 import argparse
 import math
 import time
+import datetime
 import collections
 import numpy as np
 from stable_baselines3 import PPO
 from coppeliasim_zmqremoteapi_client import RemoteAPIClient
-from tennis_rl_env import (
+from tennis_rl_env2 import (
     TennisCollectorEnv,
     BALL_COUNT,
     HALF_COURT_X_MAX,
     HALF_COURT_Y_MAX,
     OUTER_WIDTH,
     NET_WALL_Y_HALF,
+    FENCE_LENGTH,
+    FENCE_WIDTH,
 )
 
 
@@ -124,6 +127,71 @@ class RuleNavigator:
             diff += 2 * math.pi
         return diff
 
+    def _escape_from_obstacle(self, safe_margin=1.5, max_steps=200, label="Escape"):
+        """
+        若 YouBot 当前贴近边界 / 球网，先后退 + 转向场地中心脱困，再返回。
+
+        触发场景：上一轮 RL 因 stuck_at_boundary / stuck_at_net / crossed_net
+        终止时 YouBot 物理上仍贴墙；若直接进入 navigate_to(...) 规则导航，
+        电机会一直顶着墙转，navigate_to 必然超时形成假死循环。
+
+        策略：
+          - 计算到 4 边界 + 球网的最近距离 min_dist
+          - 若 min_dist >= safe_margin 直接返回 True
+          - 否则朝场地中心 (0, 0) 方向：
+              * 车头朝向相对正确（偏差 < 60°）→ 前进 + 修正
+              * 车头朝向障碍 → 后退 + 边退边转
+          - 上限 max_steps 防止永远卡住，超时返回 False（外层仍可继续，
+            只是后续导航大概率失败）
+
+        返回 True/False 仅供日志参考，不影响后续流程。
+        """
+        FENCE_LX_HALF = FENCE_LENGTH / 2     # 19.285
+        FENCE_LY_HALF = FENCE_WIDTH / 2      # 10.145
+
+        for step in range(max_steps):
+            rx, ry, ryaw = self._get_pose()
+
+            dist_xpos = FENCE_LX_HALF - rx
+            dist_xneg = rx + FENCE_LX_HALF
+            dist_ypos = FENCE_LY_HALF - ry
+            dist_yneg = ry + FENCE_LY_HALF
+            dist_net  = abs(rx)
+            min_dist = min(dist_xpos, dist_xneg, dist_ypos, dist_yneg, dist_net)
+
+            if min_dist >= safe_margin:
+                self._stop()
+                for _ in range(3):
+                    self.sim.step()
+                if step > 0:
+                    print(f"  ✅ {label} 脱困完成 ({step} 步, min_dist={min_dist:.2f}m)")
+                return True
+
+            # 目标朝向：场地中心
+            target_yaw = math.atan2(-ry, -rx)
+            angle_err = self._angle_diff(target_yaw, ryaw)
+
+            if abs(angle_err) < math.radians(60):
+                # 车头大致朝向中心 → 前进 + 转向修正
+                v_turn = max(-TURN_SPEED, min(TURN_SPEED, 2.0 * angle_err))
+                v_fwd = 2.0
+            else:
+                # 车头朝向障碍 → 后退（速度小）+ 边退边转
+                v_turn = max(-TURN_SPEED * 0.5, min(TURN_SPEED * 0.5, 1.0 * angle_err))
+                v_fwd = -1.5
+
+            self._set_motors(v_fwd + v_turn, v_fwd - v_turn,
+                             v_fwd + v_turn, v_fwd - v_turn)
+            self.sim.step()
+            if step % 5 == 0:
+                self._refresh_debug_window()
+
+        self._stop()
+        for _ in range(3):
+            self.sim.step()
+        print(f"  ⚠️ {label} 脱困超时 (max={max_steps} 步, min_dist={min_dist:.2f}m)")
+        return False
+
     def _drive_to(self, smooth_angle, dist):
         # 控制增益：
         #   TURN_KP 越大转向越激进；过大会震荡。3.0 是在稳定/响应之间的折中
@@ -156,7 +224,17 @@ class RuleNavigator:
         # 每 N 次 sim.step() 刷新一次调试窗口，取图有开销不能每帧都刷
         DEBUG_REFRESH_EVERY = 5
 
+        # ── 途中卡住检测参数 ──
+        # 若 STUCK_CHECK_EVERY 步内位移 < STUCK_DISPLACEMENT，判为撞墙/撞网
+        # 触发一次脱困（_escape_from_obstacle）后继续向目标推进
+        STUCK_CHECK_EVERY = 60       # 60 sim.step ≈ 3 秒仿真
+        STUCK_DISPLACEMENT = 0.20    # 60 步内位移 < 20cm 即判卡住
+        MAX_INFLIGHT_ESCAPES = 3     # 单次 navigate_to 内最多脱困 3 次
+
         smooth_err = None
+        last_check_pos = None
+        inflight_escapes = 0
+
         for step in range(NAV_MAX_ITER):
             rx, ry, ryaw = self._get_pose()
             dx, dy = tx - rx, ty - ry
@@ -184,6 +262,29 @@ class RuleNavigator:
                     for _ in range(3):
                         self.sim.step()
                     return "aborted"
+
+            # ── 途中卡住检测：每 STUCK_CHECK_EVERY 步检查累计位移 ──
+            if step > 0 and step % STUCK_CHECK_EVERY == 0:
+                if last_check_pos is not None:
+                    inflight_disp = math.hypot(rx - last_check_pos[0],
+                                               ry - last_check_pos[1])
+                    if inflight_disp < STUCK_DISPLACEMENT:
+                        if inflight_escapes >= MAX_INFLIGHT_ESCAPES:
+                            self._stop()
+                            for _ in range(3):
+                                self.sim.step()
+                            print(f"  ⚠️ {label} 途中反复卡住 ({MAX_INFLIGHT_ESCAPES} 次脱困仍卡)，放弃")
+                            return False
+                        print(f"  🚧 {label} 途中卡住 "
+                              f"({STUCK_CHECK_EVERY} 步位移仅 {inflight_disp:.2f}m)，触发脱困")
+                        self._escape_from_obstacle(safe_margin=1.5,
+                                                   label=f"{label}-Mid#{inflight_escapes+1}")
+                        inflight_escapes += 1
+                        # 脱困后位置已变，重置平滑误差与位置基准
+                        smooth_err = None
+                        last_check_pos = self._get_pose()[:2]
+                        continue
+                last_check_pos = (rx, ry)
         self._stop()
         for _ in range(3):
             self.sim.step()
@@ -205,6 +306,9 @@ class RuleNavigator:
           完成后当前位置在 (target_x, ±7.05)，已经在对面半场，
           RL agent 接管后会边走边找球，比规则代码直线拉回 Y=0 更有效
         """
+        # 绕网前先脱困：同 patrol_half，避免贴墙状态下规则导航撞墙超时
+        self._escape_from_obstacle(safe_margin=1.5, label="Pre-Bypass")
+
         rx, ry, _ = self._get_pose()
 
         bypass_y = NET_BYPASS_Y if ry >= 0 else -NET_BYPASS_Y
@@ -218,13 +322,13 @@ class RuleNavigator:
             (target_x, bypass_y),
         ]
 
-        print(f"  🔀 绕网到 {'X>0' if target_half > 0 else 'X<0'} 半场")
+        print(f"🔀绕网到 {'X>0' if target_half > 0 else 'X<0'} 半场")
         for i, (wx, wy) in enumerate(waypoints):
-            print(f"    ➡️ WP{i + 1}: ({wx:.1f}, {wy:.1f})")
+            print(f"➡️ WP{i + 1}: ({wx:.1f}, {wy:.1f})")
             if not self.navigate_to(wx, wy, label=f"Bypass_WP{i + 1}"):
-                print(f"  ❌ 绕网失败")
+                print(f"❌ 绕网失败")
                 return False
-        print(f"  ✅ 绕网完成")
+        print(f"✅ 绕网完成")
         return True
 
     # -----------------------------------------------------------------
@@ -242,16 +346,16 @@ class RuleNavigator:
         俯视图（X>0 半场为例，Y+ 在左，Y- 在右）:
 
                         Y+                      Y-
-                    │                       │
-            5 ←─────┼────────────── 4   x_far  (底线)
-                    │               ↑
-                    │               │
-            2 ──────┼─────────────→ 3   x_mid  (中场)
-            ↑       │
-            │       │
-            1 ←─────┼────────────── 0     x_near (近网)
-                    │
-          ──────────┼────────────── X=0 (球网)
+                       │                       │
+            5 ←────────┼────────── 4   x_far  (底线)
+                       │           ↑
+                       │           │
+            2 ─────────┼─────────→ 3   x_mid  (中场)
+            ↑          │
+            │          │
+            1 ←────────┼────────── 0     x_near (近网)
+                       │
+          ─────────────┼────────── X=0 (球网)
 
         路线: 0(近网,Y-) → 1(近网,Y+) → 2(中场,Y+)
               → 3(中场,Y-) → 4(底线,Y-) → 5(底线,Y+)
@@ -298,6 +402,10 @@ class RuleNavigator:
           True  - 巡视过程中发现了当前半场的球，已中断
           False - 走完全部点没发现球
         """
+        # 巡视前先脱困：避免上一轮 stuck_at_boundary / stuck_at_net 残留贴墙状态
+        # 导致 navigate_to 一直撞墙超时
+        self._escape_from_obstacle(safe_margin=1.5, label="Pre-Patrol")
+
         rx, ry, _ = self._get_pose()
         points = self._build_patrol_points(active_half)
         n = len(points)
@@ -315,9 +423,9 @@ class RuleNavigator:
 
         start_label = route[0]
         end_label = route[-1]
-        print(f"  🔍 开始半场巡视（{'X>0' if active_half > 0 else 'X<0'}）")
-        print(f"     S 形单程: 点#{start_label} → 点#{end_label}")
-        print(f"     总导航次数: {len(route)}")
+        print(f"🔍 开始半场巡视（{'X>0' if active_half > 0 else 'X<0'}）")
+        print(f"S 形单程: 点#{start_label} → 点#{end_label}")
+        print(f"总导航次数: {len(route)}")
 
         # ── 构造"发现球"的中断检查回调 ──
         # 只有 env 可用时才启用；调 _build_single_obs 会刷新 frame_buffer，
@@ -363,7 +471,7 @@ class RuleNavigator:
 
         for step_i, pt_idx in enumerate(route):
             wx, wy = points[pt_idx]
-            print(f"    → 点#{pt_idx}: ({wx:.1f}, {wy:.1f})")
+            print(f"🚩→ 点#{pt_idx}: ({wx:.1f}, {wy:.1f})")
             result = self.navigate_to(
                 wx, wy,
                 reach_dist=1.0,
@@ -374,10 +482,10 @@ class RuleNavigator:
                 abort_check_every=15,
             )
             if result == "aborted":
-                print(f"  🎾 巡视途中发现当前半场的球，中断巡视交给 RL")
+                print(f"🎾 巡视途中发现当前半场的球，中断巡视交给 RL")
                 return True
 
-        print(f"  ✅ 巡视完成（未发现球）")
+        print(f"✅ 巡视完成（未发现球）")
         return False
 
 
@@ -391,7 +499,7 @@ def deploy(model_path, max_rounds=30):
       RL Agent（半场内）+ 巡视确认 + 绕网切换
     """
     print("=" * 60)
-    print("  部署模式：RL Agent + 半场切换")
+    print("部署模式：RL Agent + 半场切换")
     print("=" * 60)
 
     # 加载 RL 模型
@@ -401,6 +509,18 @@ def deploy(model_path, max_rounds=30):
     # 创建环境
     active_half = 1
     env = TennisCollectorEnv(render_mode="human", active_half=active_half)
+
+    # 兼容性检查：动作空间维度必须匹配（避免 V1 env 加载 V2 模型导致 KeyError）
+    expected_n = env.action_space.n
+    loaded_n = model.action_space.n if hasattr(model.action_space, 'n') else None
+    if loaded_n != expected_n:
+        env.close()
+        raise ValueError(
+            f"模型动作空间 ({loaded_n}) 与当前 env 动作空间 ({expected_n}) 不匹配。"
+            f"V2 模型 (9 动作) 需配 tennis_rl_env2；V1 模型 (7 动作) 需配 tennis_rl_env。"
+            f"请检查本文件顶部 `from tennis_rl_envX import ...` 与 --model 路径是否对应同一版本。"
+        )
+    print(f"✅ 动作空间一致 ({expected_n} 动作)")
 
     # 创建规则导航器
     # 传入 env 引用，让导航过程中能周期性刷新 OpenCV 调试窗口
@@ -426,18 +546,18 @@ def deploy(model_path, max_rounds=30):
 
     for round_idx in range(max_rounds):
         print(f"\n{'=' * 40}")
-        print(f"  Round {round_idx + 1} | 半场: {'X>0' if active_half > 0 else 'X<0'} "
+        print(f"Round {round_idx + 1} | 半场: {'X>0' if active_half > 0 else 'X<0'} "
               f"| 已收集: {total_collected}")
         print(f"{'=' * 40}")
 
         # 刷新球数
         env._refresh_ball_handles()
         balls_in_half = env._count_balls_in_active_half()
-        print(f"  当前半场剩余: {balls_in_half} 个球")
+        print(f"📋 当前半场剩余: {balls_in_half} 个球")
 
         if balls_in_half == 0:
             # 当前半场无球 → 巡视确认
-            print(f"  📋 当前半场看起来已清空，执行巡视确认...")
+            print(f"❓️当前半场看起来已清空，执行巡视确认...")
             found = navigator.patrol_half(active_half)
             if found:
                 # 巡视中途看到了球 → 下一轮主循环会自然进入 RL 捡球
@@ -458,7 +578,7 @@ def deploy(model_path, max_rounds=30):
 
                 if balls_other == 0:
                     print(f"\n🎉 两个半场都已清空！")
-                    print(f"   总计收集: {total_collected} 个球")
+                    print(f"📝 总计收集: {total_collected} 个球")
                     break
 
                 # 绕网切换
@@ -468,7 +588,7 @@ def deploy(model_path, max_rounds=30):
                 no_ball_streak = 0
                 continue
             else:
-                print(f"  ⚠️ 巡视后发现还有 {balls_in_half} 个球！继续捡...")
+                print(f"⚠️ 巡视后发现还有 {balls_in_half} 个球！继续捡...")
                 no_ball_streak = 0
 
         # ── RL Agent 捡球 ──
@@ -527,7 +647,7 @@ def deploy(model_path, max_rounds=30):
                 x_range = max(xs) - min(xs)
                 y_range = max(ys) - min(ys)
                 if x_range < STUCK_THRESHOLD and y_range < STUCK_THRESHOLD:
-                    print(f"  🌀 检测到原地摇头 "
+                    print(f"🌀 检测到原地摇头 "
                           f"(最近 {STUCK_WINDOW} 步 Δx={x_range:.2f}m Δy={y_range:.2f}m)"
                           f"，跳出 RL 循环触发巡视")
                     stuck_triggered = True
@@ -551,7 +671,7 @@ def deploy(model_path, max_rounds=30):
 
         if stuck_triggered:
             # 卡住不计入 RL 失败，直接巡视打破僵局
-            print(f"  🔍 卡住触发：执行巡视寻找球...")
+            print(f"🔍 卡住触发：执行巡视寻找球...")
             found = navigator.patrol_half(active_half)
             if found:
                 patrol_just_found_ball = True
@@ -559,10 +679,10 @@ def deploy(model_path, max_rounds=30):
         elif info.get('success', False):
             total_collected += 1
             no_ball_streak = 0
-            print(f"  ✅ 捡到球！(奖励={ep_reward:+.1f}, 步数={info['step']})")
+            print(f"✅ 捡到球！(奖励={ep_reward:+.1f}, 步数={info['step']})")
         else:
             no_ball_streak += 1
-            print(f"  ❌ 未捡到 (原因={info.get('reason', '?')}, "
+            print(f"❌ 未捡到 (原因={info.get('reason', '?')}, "
                   f"奖励={ep_reward:+.1f}, 连续失败={no_ball_streak})")
 
         # 连续失败 → 巡视
@@ -576,7 +696,7 @@ def deploy(model_path, max_rounds=30):
     env.close()
 
     print(f"\n{'=' * 60}")
-    print(f"  🏁 部署结束 | 总计收集: {total_collected} 个球")
+    print(f"🏁 部署结束 | 总计收集: {total_collected} 个球")
     print(f"{'=' * 60}")
 
 
@@ -586,8 +706,13 @@ def deploy(model_path, max_rounds=30):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="部署 RL 捡球 Agent")
-    parser.add_argument("--model", type=str, default="./models/best_model/best_model.zip", help="模型文件路径")
+    parser.add_argument("--model", type=str, default="./models_v2/best_model/best_model.zip", help="模型文件路径")
     parser.add_argument("--rounds", type=int, default=30, help="最大轮数")
     args = parser.parse_args()
 
+    print(f"开始：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    start_time = time.time()
     deploy(args.model, max_rounds=args.rounds)
+    span_time = time.time() - start_time
+    print(f"用时{span_time}")
+    print(f"\n结束：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
