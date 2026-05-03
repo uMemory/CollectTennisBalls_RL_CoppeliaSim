@@ -50,27 +50,7 @@ Python RL 训练 / 部署 (PPO 算法)
 
 ### 三层分层架构（部署时）
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 320" width="720" height="320">
-  <defs>
-    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0,0 L10,5 L0,10 z" fill="#444"/>
-    </marker>
-  </defs>
-  <rect x="20" y="20" width="680" height="80" rx="8" fill="#e3f2fd" stroke="#1976d2" stroke-width="2"/>
-  <text x="40" y="48" font-family="Consolas,monospace" font-size="16" font-weight="bold" fill="#0d47a1">顶层调度（规则代码）</text>
-  <text x="40" y="78" font-family="Consolas,monospace" font-size="13" fill="#0d47a1">半场切换 + 绕网（避开网柱 |Y|=6.40 与椅子 |Y|=7.72，走廊 |Y|=7.05）</text>
-
-  <rect x="20" y="120" width="680" height="80" rx="8" fill="#fff3e0" stroke="#e65100" stroke-width="2"/>
-  <text x="40" y="148" font-family="Consolas,monospace" font-size="16" font-weight="bold" fill="#bf360c">中层巡视（规则代码）</text>
-  <text x="40" y="178" font-family="Consolas,monospace" font-size="13" fill="#bf360c">S 形 6 路径点扫描，端点就近切入 + 严格 est_bx 阈值 + 连续 3 次确认</text>
-
-  <rect x="20" y="220" width="680" height="80" rx="8" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
-  <text x="40" y="248" font-family="Consolas,monospace" font-size="16" font-weight="bold" fill="#1b5e20">底层 RL Agent（Gymnasium 环境 TennisCollectorEnv）</text>
-  <text x="40" y="278" font-family="Consolas,monospace" font-size="13" fill="#1b5e20">PPO 策略 · 30 维语义观测 · 9 动作 · 单 episode = 在当前半场捡 1 个球</text>
-
-  <line x1="360" y1="100" x2="360" y2="120" stroke="#444" stroke-width="2" marker-end="url(#ar)"/>
-  <line x1="360" y1="200" x2="360" y2="220" stroke="#444" stroke-width="2" marker-end="url(#ar)"/>
-</svg>
+![三层分层架构](docs/images/architecture.png)
 
 只有"在当前半场内找到并消除一个球"这一最难的视觉感知 + 闭环运动控制部分交给 PPO 学习；
 全场调度、绕网、巡视等几何明确的部分由规则代码处理，避免无谓增加 RL 学习负担。
@@ -84,6 +64,10 @@ Tennis_Collector/
 │   ├── tennis_scene_init.lua              -- 创建场景脚本 V1.0
 │   ├── tennis_scene_latest.lua            -- 创建场景脚本 V2.0
 │   └── Tennis_Generate.lua                -- 随机位置网球生成脚本
+│
+├── docs/
+│   ├── svg/                               -- README 流程图 / 场地图的 SVG 源码（可编辑）
+│   └── images/                            -- 同名 PNG 导出
 │
 ├── tennis_rl_env.py                       -- RL 环境 V1（7 动作）
 ├── tennis_rl_env2.py                      -- RL 环境 V2（9 动作 + 视野新鲜度）
@@ -240,78 +224,7 @@ V2 在 V1 基础上**新增 2 个后退动作**，解决"球在背后时只能�
 
 #### 单步奖励判定流程
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 540" width="880" height="540">
-  <defs>
-    <marker id="rar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0,0 L10,5 L0,10 z" fill="#444"/>
-    </marker>
-  </defs>
-
-  <!-- 入口：本步动作执行后 -->
-  <rect x="340" y="10" width="200" height="40" rx="20" fill="#3949ab" stroke="#1a237e" stroke-width="2"/>
-  <text x="440" y="35" font-family="Consolas,monospace" font-size="13" fill="#fff" text-anchor="middle">step() 调用</text>
-
-  <!-- 判定 1：是否消除球 -->
-  <polygon points="440,70 600,110 440,150 280,110" fill="#ffe082" stroke="#ff8f00" stroke-width="2"/>
-  <text x="440" y="108" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#5d4037" text-anchor="middle">距离 &lt; 0.40 m？</text>
-  <text x="440" y="125" font-family="Consolas,monospace" font-size="11" fill="#5d4037" text-anchor="middle">(消除一个球)</text>
-  <line x1="440" y1="50" x2="440" y2="70" stroke="#444" stroke-width="2" marker-end="url(#rar)"/>
-
-  <!-- yes -> +100 终止 -->
-  <rect x="640" y="90" width="220" height="40" rx="6" fill="#43a047" stroke="#1b5e20" stroke-width="2"/>
-  <text x="750" y="115" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">return +100  (terminated)</text>
-  <line x1="600" y1="110" x2="640" y2="110" stroke="#444" stroke-width="2" marker-end="url(#rar)"/>
-  <text x="610" y="105" font-family="Consolas,monospace" font-size="11" fill="#2e7d32">YES</text>
-
-  <!-- 否 -> 基础项 -->
-  <line x1="440" y1="150" x2="440" y2="180" stroke="#444" stroke-width="2" marker-end="url(#rar)"/>
-  <text x="450" y="170" font-family="Consolas,monospace" font-size="11" fill="#666">NO</text>
-
-  <rect x="290" y="180" width="300" height="55" rx="6" fill="#eceff1" stroke="#546e7a" stroke-width="1.5"/>
-  <text x="440" y="202" font-family="Consolas,monospace" font-size="12" fill="#263238" text-anchor="middle">reward = -0.1  (基础时间惩罚)</text>
-  <text x="440" y="222" font-family="Consolas,monospace" font-size="12" fill="#263238" text-anchor="middle">if 位移 &lt; 0.02m: reward -= 1.0</text>
-
-  <!-- 视觉引导分支 -->
-  <line x1="440" y1="235" x2="440" y2="260" stroke="#444" stroke-width="2" marker-end="url(#rar)"/>
-  <rect x="290" y="260" width="300" height="35" rx="6" fill="#bbdefb" stroke="#1565c0" stroke-width="2"/>
-  <text x="440" y="283" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#0d47a1" text-anchor="middle">视觉状态？</text>
-
-  <!-- 三个分支 -->
-  <line x1="340" y1="295" x2="120" y2="335" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
-  <line x1="440" y1="295" x2="440" y2="335" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
-  <line x1="540" y1="295" x2="760" y2="335" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
-
-  <!-- 分支 A：活跃半场内有球 -->
-  <rect x="20" y="335" width="220" height="100" rx="6" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
-  <text x="130" y="355" font-family="Consolas,monospace" font-size="12" font-weight="bold" fill="#1b5e20" text-anchor="middle">(A) 看到活跃半场球</text>
-  <text x="30" y="375" font-family="Consolas,monospace" font-size="11" fill="#1b5e20">+ 0.5  (移动奖励)</text>
-  <text x="30" y="392" font-family="Consolas,monospace" font-size="11" fill="#1b5e20">+ 1.0·(1 - |angle|)  (对齐)</text>
-  <text x="30" y="409" font-family="Consolas,monospace" font-size="11" fill="#1b5e20">+ 5.0·Δsize  (接近)</text>
-  <text x="30" y="426" font-family="Consolas,monospace" font-size="11" fill="#1b5e20">no_ball_steps = 0</text>
-
-  <!-- 分支 B：只有对面半场球 -->
-  <rect x="330" y="335" width="220" height="100" rx="6" fill="#ffe0b2" stroke="#e65100" stroke-width="2"/>
-  <text x="440" y="355" font-family="Consolas,monospace" font-size="12" font-weight="bold" fill="#bf360c" text-anchor="middle">(B) 只有对面半场球</text>
-  <text x="340" y="378" font-family="Consolas,monospace" font-size="11" fill="#bf360c">- 0.5  (注意错误目标)</text>
-  <text x="340" y="398" font-family="Consolas,monospace" font-size="11" fill="#bf360c">no_ball_steps += 1</text>
-
-  <!-- 分支 C：完全看不到球 -->
-  <rect x="640" y="335" width="220" height="100" rx="6" fill="#ffcdd2" stroke="#b71c1c" stroke-width="2"/>
-  <text x="750" y="355" font-family="Consolas,monospace" font-size="12" font-weight="bold" fill="#b71c1c" text-anchor="middle">(C) 完全看不到球</text>
-  <text x="650" y="378" font-family="Consolas,monospace" font-size="11" fill="#b71c1c">no_ball_steps += 1</text>
-  <text x="650" y="398" font-family="Consolas,monospace" font-size="11" fill="#b71c1c">- min(0.3 + 0.01·n, 1.5)</text>
-  <text x="650" y="416" font-family="Consolas,monospace" font-size="10" fill="#b71c1c">(V2 视野新鲜度线性递增)</text>
-
-  <!-- 汇总 -->
-  <line x1="130" y1="435" x2="430" y2="465" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
-  <line x1="440" y1="435" x2="440" y2="465" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
-  <line x1="750" y1="435" x2="450" y2="465" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
-
-  <rect x="180" y="465" width="520" height="60" rx="6" fill="#e1f5fe" stroke="#0277bd" stroke-width="1.5"/>
-  <text x="440" y="486" font-family="Consolas,monospace" font-size="11" fill="#01579b" text-anchor="middle">+ 边界惩罚 -3.0·(1.0 - dist_b)  (dist_b &lt; 1.0)</text>
-  <text x="440" y="504" font-family="Consolas,monospace" font-size="11" fill="#01579b" text-anchor="middle">+ 球网惩罚 -4.0·(0.8 - dist_n)  (dist_n &lt; 0.8)</text>
-  <text x="440" y="520" font-family="Consolas,monospace" font-size="11" fill="#01579b" text-anchor="middle">+ 摇头惩罚 -1.0  (yaw 变化 &gt; 0.3 且 位移 &lt; 0.02)</text>
-</svg>
+![单步奖励判定流程](docs/images/reward_flow.png)
 
 > 终止性大惩罚（越网 / 卡边界 / 卡网）在判定流程之外另行触发，每次额外 `-10`。
 
@@ -384,70 +297,7 @@ V2 在 V1 基础上**新增 2 个后退动作**，解决"球在背后时只能�
 
 ### 5. 视觉感知流水线
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 760" width="880" height="760">
-
-  <rect x="240" y="20" width="400" height="60" rx="8" fill="#3949ab" stroke="#1a237e" stroke-width="2"/>
-  <text x="440" y="46" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">① visionSensor 取图</text>
-  <text x="440" y="68" font-family="Consolas,monospace" font-size="12" fill="#e8eaf6" text-anchor="middle">RGB 图像  1024 × 1024</text>
-
-  <line x1="440" y1="80" x2="440" y2="105" stroke="#444" stroke-width="2"/>
-  <polygon points="436,101 444,101 440,109" fill="#444"/>
-
-  <rect x="200" y="110" width="480" height="74" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
-  <text x="440" y="134" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#0d47a1" text-anchor="middle">② 裁剪上方 40%</text>
-  <text x="440" y="155" font-family="Consolas,monospace" font-size="11" fill="#0d47a1" text-anchor="middle">输出 614 × 1024（保留下方 60%）</text>
-  <text x="440" y="173" font-family="Consolas,monospace" font-size="11" fill="#0d47a1" text-anchor="middle">理由：远处球集中在画面中下部，上方为天空 / 远景噪声</text>
-
-  <line x1="440" y1="184" x2="440" y2="209" stroke="#444" stroke-width="2"/>
-  <polygon points="436,205 444,205 440,213" fill="#444"/>
-
-  <rect x="200" y="214" width="480" height="74" rx="8" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
-  <text x="440" y="238" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#1b5e20" text-anchor="middle">③ HSV 阈值分割</text>
-  <text x="440" y="259" font-family="Consolas,monospace" font-size="11" fill="#1b5e20" text-anchor="middle">H ∈ [25, 45]   S ∈ [80, 255]   V ∈ [80, 255]</text>
-  <text x="440" y="277" font-family="Consolas,monospace" font-size="11" fill="#1b5e20" text-anchor="middle">输出二值掩码 (mask)，命中网球的荧光黄绿色</text>
-
-  <line x1="440" y1="288" x2="440" y2="313" stroke="#444" stroke-width="2"/>
-  <polygon points="436,309 444,309 440,317" fill="#444"/>
-
-  <rect x="200" y="318" width="480" height="74" rx="8" fill="#fff3e0" stroke="#e65100" stroke-width="2"/>
-  <text x="440" y="342" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#bf360c" text-anchor="middle">④ 形态学去毛刺</text>
-  <text x="440" y="363" font-family="Consolas,monospace" font-size="11" fill="#bf360c" text-anchor="middle">OPEN（5×5 椭圆核）→ 去散点 + CLOSE → 填充小空洞</text>
-  <text x="440" y="381" font-family="Consolas,monospace" font-size="11" fill="#bf360c" text-anchor="middle">得到平滑的网球区域块</text>
-
-  <line x1="440" y1="392" x2="440" y2="417" stroke="#444" stroke-width="2"/>
-  <polygon points="436,413 444,413 440,421" fill="#444"/>
-
-  <rect x="200" y="422" width="480" height="74" rx="8" fill="#f3e5f5" stroke="#6a1b9a" stroke-width="2"/>
-  <text x="440" y="446" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#4a148c" text-anchor="middle">⑤ 轮廓检测 + 面积过滤</text>
-  <text x="440" y="467" font-family="Consolas,monospace" font-size="11" fill="#4a148c" text-anchor="middle">findContours(RETR_EXTERNAL)，丢弃 area &lt; 30 像素的小斑点</text>
-  <text x="440" y="485" font-family="Consolas,monospace" font-size="11" fill="#4a148c" text-anchor="middle">按面积降序排序 → 最大 = 最近的球</text>
-
-  <line x1="440" y1="496" x2="440" y2="521" stroke="#444" stroke-width="2"/>
-  <polygon points="436,517 444,517 440,525" fill="#444"/>
-
-  <rect x="80" y="526" width="720" height="120" rx="8" fill="#fce4ec" stroke="#ad1457" stroke-width="2"/>
-  <text x="440" y="550" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#880e4f" text-anchor="middle">⑥ 估计世界坐标 (est_bx, est_by, est_dist)</text>
-  <text x="440" y="572" font-family="Consolas,monospace" font-size="11" fill="#880e4f" text-anchor="middle">ball_angle_rad = atan(angle_norm × tan(FOV/2))     ← 精确反三角，非小角度近似</text>
-  <text x="440" y="592" font-family="Consolas,monospace" font-size="11" fill="#880e4f" text-anchor="middle">est_dist = (R_ball × W) / (2 × pixel_radius × tan(FOV/2))</text>
-  <text x="440" y="612" font-family="Consolas,monospace" font-size="11" fill="#880e4f" text-anchor="middle">est_bx = robot_x + est_dist × cos(robot_yaw + ball_angle_rad)</text>
-  <text x="440" y="632" font-family="Consolas,monospace" font-size="11" fill="#880e4f" text-anchor="middle">est_by = robot_y + est_dist × sin(robot_yaw + ball_angle_rad)</text>
-
-  <line x1="440" y1="646" x2="440" y2="671" stroke="#444" stroke-width="2"/>
-  <polygon points="436,667 444,667 440,675" fill="#444"/>
-
-  <line x1="440" y1="671" x2="220" y2="690" stroke="#444" stroke-width="1.5"/>
-  <polygon points="222,686 222,694 213,690" fill="#444"/>
-  <line x1="440" y1="671" x2="660" y2="690" stroke="#444" stroke-width="1.5"/>
-  <polygon points="658,686 658,694 667,690" fill="#444"/>
-
-  <rect x="40" y="692" width="360" height="60" rx="8" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
-  <text x="220" y="715" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#1b5e20" text-anchor="middle">⑦-A 严格半场过滤</text>
-  <text x="220" y="736" font-family="Consolas,monospace" font-size="11" fill="#1b5e20" text-anchor="middle">est_bx 在己方半场（&gt;0 / &lt;0）→ 用于观测特征</text>
-
-  <rect x="480" y="692" width="360" height="60" rx="8" fill="#ffcdd2" stroke="#b71c1c" stroke-width="2"/>
-  <text x="660" y="715" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#b71c1c" text-anchor="middle">⑦-B 全部检测结果</text>
-  <text x="660" y="736" font-family="Consolas,monospace" font-size="11" fill="#b71c1c" text-anchor="middle">含对面半场球 → 用于「错误目标」惩罚判定</text>
-</svg>
+![视觉感知流水线](docs/images/vision_pipeline.png)
 
 ---
 
@@ -586,103 +436,7 @@ S 形 6 路径点（近网 / 中场 / 底线 × 左右两端）单程扫描，�
 > 比例：X 轴 1m ≈ 22px，Y 轴 1m ≈ 17.5px；屏幕向上 = 世界 Y+。
 > 物体位置严格依据 `scene/tennis_scene_latest.lua` 的真实坐标绘制。
 
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 480" width="880" height="480">
-
-  <rect x="20" y="20" width="840" height="400" fill="#f5f5f5" stroke="#666" stroke-width="2" stroke-dasharray="6 4"/>
-  <text x="28" y="35" font-family="Consolas,monospace" font-size="11" fill="#666">围栏 38.57 × 20.29 m</text>
-
-  <rect x="40" y="40" width="800" height="320" fill="#7cb342" fill-opacity="0.20" stroke="#558b2f" stroke-width="1.5"/>
-  <rect x="40" y="40" width="400" height="320" fill="#bbdefb" fill-opacity="0.30"/>
-  <rect x="440" y="40" width="400" height="320" fill="#ffe082" fill-opacity="0.30"/>
-  <text x="240" y="56" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#0d47a1" text-anchor="middle">X &lt; 0 半场（active_half = -1）</text>
-  <text x="640" y="56" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#bf360c" text-anchor="middle">X &gt; 0 半场（active_half = +1）</text>
-
-  <rect x="180" y="104" width="520" height="192" fill="#7cb342" fill-opacity="0.45" stroke="#33691e" stroke-width="1.5"/>
-
-  <line x1="40" y1="77" x2="840" y2="77" stroke="#1565c0" stroke-width="1.5" stroke-dasharray="6 3"/>
-  <line x1="40" y1="323" x2="840" y2="323" stroke="#1565c0" stroke-width="1.5" stroke-dasharray="6 3"/>
-  <text x="48" y="73" font-family="Consolas,monospace" font-size="10" fill="#0d47a1">绕网走廊 Y=+7.05</text>
-  <text x="48" y="335" font-family="Consolas,monospace" font-size="10" fill="#0d47a1">绕网走廊 Y=-7.05</text>
-
-  <line x1="440" y1="40" x2="440" y2="360" stroke="#d32f2f" stroke-width="3"/>
-  <text x="446" y="38" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#b71c1c">球网 X=0</text>
-  <circle cx="440" cy="88" r="5" fill="#000"/>
-  <circle cx="440" cy="312" r="5" fill="#000"/>
-  <text x="448" y="92" font-family="Consolas,monospace" font-size="9" fill="#333">网柱 Y=+6.40</text>
-  <text x="448" y="316" font-family="Consolas,monospace" font-size="9" fill="#333">网柱 Y=-6.40</text>
-
-  <rect x="424" y="50" width="32" height="8" fill="#5d4037" stroke="#3e2723" stroke-width="1"/>
-  <text x="460" y="58" font-family="Consolas,monospace" font-size="10" fill="#3e2723">长椅 #2  (X=0, Y=+8.345, 1.5×0.4m)</text>
-  <rect x="424" y="342" width="32" height="8" fill="#5d4037" stroke="#3e2723" stroke-width="1"/>
-  <text x="460" y="354" font-family="Consolas,monospace" font-size="10" fill="#3e2723">长椅 #1  (X=0, Y=-8.345, 1.5×0.4m)</text>
-
-  <rect x="822" y="40" width="18" height="18" fill="#fb8c00" stroke="#e65100" stroke-width="1.5"/>
-  <text x="822" y="35" font-family="Consolas,monospace" font-size="10" font-weight="bold" fill="#bf360c">📦 回收仓 Bin</text>
-  <text x="690" y="68" font-family="Consolas,monospace" font-size="10" fill="#bf360c">中心 (17.885, 8.645) 0.8×1.0m</text>
-  <line x1="780" y1="65" x2="822" y2="50" stroke="#bf360c" stroke-width="1" stroke-dasharray="2 2"/>
-
-  <line x1="495" y1="322" x2="495" y2="78" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="495" y1="78"  x2="640" y2="78" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="640" y1="78"  x2="640" y2="322" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="640" y1="322" x2="807" y2="322" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="807" y1="322" x2="807" y2="78" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
-  <polygon points="803,90 811,90 807,80" fill="#ff5722"/>
-
-  <circle cx="495" cy="322" r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
-  <text x="495" y="326" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">0</text>
-  <circle cx="495" cy="78"  r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
-  <text x="495" y="82" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">1</text>
-  <circle cx="640" cy="78"  r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
-  <text x="640" y="82" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">2</text>
-  <circle cx="640" cy="322" r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
-  <text x="640" y="326" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
-  <circle cx="807" cy="322" r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
-  <text x="807" y="326" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">4</text>
-  <circle cx="807" cy="78"  r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
-  <text x="807" y="82" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">5</text>
-
-  <line x1="385" y1="322" x2="385" y2="78" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="385" y1="78"  x2="240" y2="78" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="240" y1="78"  x2="240" y2="322" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="240" y1="322" x2="73"  y2="322" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="73"  y1="322" x2="73"  y2="78" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
-  <polygon points="69,90 77,90 73,80" fill="#8e24aa"/>
-
-  <circle cx="385" cy="322" r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
-  <text x="385" y="326" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">0</text>
-  <circle cx="385" cy="78"  r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
-  <text x="385" y="82" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">1</text>
-  <circle cx="240" cy="78"  r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
-  <text x="240" y="82" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">2</text>
-  <circle cx="240" cy="322" r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
-  <text x="240" y="326" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
-  <circle cx="73"  cy="322" r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
-  <text x="73"  y="326" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">4</text>
-  <circle cx="73"  cy="78"  r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
-  <text x="73"  y="82" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">5</text>
-
-  <circle cx="374" cy="200" r="6" fill="#1976d2"/>
-  <text x="320" y="204" font-family="Consolas,monospace" font-size="10" fill="#0d47a1">绕网起点</text>
-  <line x1="374" y1="200" x2="374" y2="80" stroke="#1976d2" stroke-width="2.5"/>
-  <polygon points="370,84 378,84 374,76" fill="#1976d2"/>
-  <line x1="374" y1="77" x2="504" y2="77" stroke="#1976d2" stroke-width="2.5"/>
-  <polygon points="500,73 500,81 508,77" fill="#1976d2"/>
-  <text x="320" y="140" font-family="Consolas,monospace" font-size="10" fill="#0d47a1">① 上走廊</text>
-  <text x="430" y="70" font-family="Consolas,monospace" font-size="10" fill="#0d47a1">② 横穿球网</text>
-
-  <rect x="20" y="430" width="840" height="44" fill="#fafafa" stroke="#bdbdbd" stroke-width="1"/>
-  <circle cx="36" cy="445" r="7" fill="#ff5722"/>
-  <text x="50" y="449" font-family="Consolas,monospace" font-size="11" fill="#333">X&gt;0 半场巡视 (0→1→2→3→4→5)</text>
-  <circle cx="276" cy="445" r="7" fill="#8e24aa"/>
-  <text x="290" y="449" font-family="Consolas,monospace" font-size="11" fill="#333">X&lt;0 半场巡视（镜像）</text>
-  <circle cx="468" cy="445" r="6" fill="#1976d2"/>
-  <text x="482" y="449" font-family="Consolas,monospace" font-size="11" fill="#333">绕网路径</text>
-  <rect x="566" y="441" width="14" height="8" fill="#5d4037"/>
-  <text x="586" y="449" font-family="Consolas,monospace" font-size="11" fill="#333">长椅</text>
-  <rect x="624" y="439" width="12" height="12" fill="#fb8c00" stroke="#e65100"/>
-  <text x="642" y="449" font-family="Consolas,monospace" font-size="11" fill="#333">回收仓</text>
-  <text x="36" y="466" font-family="Consolas,monospace" font-size="10" fill="#555">巡视规则：每次进入半场时，比较 YouBot 到点 0 与点 5 的距离，从更近端点开始单程走完 6 个点；途中检测到当前半场内的球立即中断，交还 RL Agent。</text>
-</svg>
+![场地俯视图（巡视路径 + 绕网走廊 + 实际物体位置）](docs/images/court_layout.png)
 
 ### 卡顿兜底（三层保护）
 

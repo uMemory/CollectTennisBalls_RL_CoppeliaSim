@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 540" width="880" height="540">
+  <defs>
+    <marker id="rar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#444"/>
+    </marker>
+  </defs>
+
+  <!-- 入口：本步动作执行后 -->
+  <rect x="340" y="10" width="200" height="40" rx="20" fill="#3949ab" stroke="#1a237e" stroke-width="2"/>
+  <text x="440" y="35" font-family="Consolas,monospace" font-size="13" fill="#fff" text-anchor="middle">step() 调用</text>
+
+  <!-- 判定 1：是否消除球 -->
+  <polygon points="440,70 600,110 440,150 280,110" fill="#ffe082" stroke="#ff8f00" stroke-width="2"/>
+  <text x="440" y="108" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#5d4037" text-anchor="middle">距离 &lt; 0.40 m？</text>
+  <text x="440" y="125" font-family="Consolas,monospace" font-size="11" fill="#5d4037" text-anchor="middle">(消除一个球)</text>
+  <line x1="440" y1="50" x2="440" y2="70" stroke="#444" stroke-width="2" marker-end="url(#rar)"/>
+
+  <!-- yes -> +100 终止 -->
+  <rect x="640" y="90" width="220" height="40" rx="6" fill="#43a047" stroke="#1b5e20" stroke-width="2"/>
+  <text x="750" y="115" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#fff" text-anchor="middle">return +100  (terminated)</text>
+  <line x1="600" y1="110" x2="640" y2="110" stroke="#444" stroke-width="2" marker-end="url(#rar)"/>
+  <text x="610" y="105" font-family="Consolas,monospace" font-size="11" fill="#2e7d32">YES</text>
+
+  <!-- 否 -> 基础项 -->
+  <line x1="440" y1="150" x2="440" y2="180" stroke="#444" stroke-width="2" marker-end="url(#rar)"/>
+  <text x="450" y="170" font-family="Consolas,monospace" font-size="11" fill="#666">NO</text>
+
+  <rect x="290" y="180" width="300" height="55" rx="6" fill="#eceff1" stroke="#546e7a" stroke-width="1.5"/>
+  <text x="440" y="202" font-family="Consolas,monospace" font-size="12" fill="#263238" text-anchor="middle">reward = -0.1  (基础时间惩罚)</text>
+  <text x="440" y="222" font-family="Consolas,monospace" font-size="12" fill="#263238" text-anchor="middle">if 位移 &lt; 0.02m: reward -= 1.0</text>
+
+  <!-- 视觉引导分支 -->
+  <line x1="440" y1="235" x2="440" y2="260" stroke="#444" stroke-width="2" marker-end="url(#rar)"/>
+  <rect x="290" y="260" width="300" height="35" rx="6" fill="#bbdefb" stroke="#1565c0" stroke-width="2"/>
+  <text x="440" y="283" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#0d47a1" text-anchor="middle">视觉状态？</text>
+
+  <!-- 三个分支 -->
+  <line x1="340" y1="295" x2="120" y2="335" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
+  <line x1="440" y1="295" x2="440" y2="335" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
+  <line x1="540" y1="295" x2="760" y2="335" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
+
+  <!-- 分支 A：活跃半场内有球 -->
+  <rect x="20" y="335" width="220" height="100" rx="6" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="130" y="355" font-family="Consolas,monospace" font-size="12" font-weight="bold" fill="#1b5e20" text-anchor="middle">(A) 看到活跃半场球</text>
+  <text x="30" y="375" font-family="Consolas,monospace" font-size="11" fill="#1b5e20">+ 0.5  (移动奖励)</text>
+  <text x="30" y="392" font-family="Consolas,monospace" font-size="11" fill="#1b5e20">+ 1.0·(1 - |angle|)  (对齐)</text>
+  <text x="30" y="409" font-family="Consolas,monospace" font-size="11" fill="#1b5e20">+ 5.0·Δsize  (接近)</text>
+  <text x="30" y="426" font-family="Consolas,monospace" font-size="11" fill="#1b5e20">no_ball_steps = 0</text>
+
+  <!-- 分支 B：只有对面半场球 -->
+  <rect x="330" y="335" width="220" height="100" rx="6" fill="#ffe0b2" stroke="#e65100" stroke-width="2"/>
+  <text x="440" y="355" font-family="Consolas,monospace" font-size="12" font-weight="bold" fill="#bf360c" text-anchor="middle">(B) 只有对面半场球</text>
+  <text x="340" y="378" font-family="Consolas,monospace" font-size="11" fill="#bf360c">- 0.5  (注意错误目标)</text>
+  <text x="340" y="398" font-family="Consolas,monospace" font-size="11" fill="#bf360c">no_ball_steps += 1</text>
+
+  <!-- 分支 C：完全看不到球 -->
+  <rect x="640" y="335" width="220" height="100" rx="6" fill="#ffcdd2" stroke="#b71c1c" stroke-width="2"/>
+  <text x="750" y="355" font-family="Consolas,monospace" font-size="12" font-weight="bold" fill="#b71c1c" text-anchor="middle">(C) 完全看不到球</text>
+  <text x="650" y="378" font-family="Consolas,monospace" font-size="11" fill="#b71c1c">no_ball_steps += 1</text>
+  <text x="650" y="398" font-family="Consolas,monospace" font-size="11" fill="#b71c1c">- min(0.3 + 0.01·n, 1.5)</text>
+  <text x="650" y="416" font-family="Consolas,monospace" font-size="10" fill="#b71c1c">(V2 视野新鲜度线性递增)</text>
+
+  <!-- 汇总 -->
+  <line x1="130" y1="435" x2="430" y2="465" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
+  <line x1="440" y1="435" x2="440" y2="465" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
+  <line x1="750" y1="435" x2="450" y2="465" stroke="#444" stroke-width="1.5" marker-end="url(#rar)"/>
+
+  <rect x="180" y="465" width="520" height="60" rx="6" fill="#e1f5fe" stroke="#0277bd" stroke-width="1.5"/>
+  <text x="440" y="486" font-family="Consolas,monospace" font-size="11" fill="#01579b" text-anchor="middle">+ 边界惩罚 -3.0·(1.0 - dist_b)  (dist_b &lt; 1.0)</text>
+  <text x="440" y="504" font-family="Consolas,monospace" font-size="11" fill="#01579b" text-anchor="middle">+ 球网惩罚 -4.0·(0.8 - dist_n)  (dist_n &lt; 0.8)</text>
+  <text x="440" y="520" font-family="Consolas,monospace" font-size="11" fill="#01579b" text-anchor="middle">+ 摇头惩罚 -1.0  (yaw 变化 &gt; 0.3 且 位移 &lt; 0.02)</text>
+</svg>

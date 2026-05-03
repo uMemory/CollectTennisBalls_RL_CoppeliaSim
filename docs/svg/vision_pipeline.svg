@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 760" width="880" height="760">
+
+  <rect x="240" y="20" width="400" height="60" rx="8" fill="#3949ab" stroke="#1a237e" stroke-width="2"/>
+  <text x="440" y="46" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#fff" text-anchor="middle">① visionSensor 取图</text>
+  <text x="440" y="68" font-family="Consolas,monospace" font-size="12" fill="#e8eaf6" text-anchor="middle">RGB 图像  1024 × 1024</text>
+
+  <line x1="440" y1="80" x2="440" y2="105" stroke="#444" stroke-width="2"/>
+  <polygon points="436,101 444,101 440,109" fill="#444"/>
+
+  <rect x="200" y="110" width="480" height="74" rx="8" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
+  <text x="440" y="134" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#0d47a1" text-anchor="middle">② 裁剪上方 40%</text>
+  <text x="440" y="155" font-family="Consolas,monospace" font-size="11" fill="#0d47a1" text-anchor="middle">输出 614 × 1024（保留下方 60%）</text>
+  <text x="440" y="173" font-family="Consolas,monospace" font-size="11" fill="#0d47a1" text-anchor="middle">理由：远处球集中在画面中下部，上方为天空 / 远景噪声</text>
+
+  <line x1="440" y1="184" x2="440" y2="209" stroke="#444" stroke-width="2"/>
+  <polygon points="436,205 444,205 440,213" fill="#444"/>
+
+  <rect x="200" y="214" width="480" height="74" rx="8" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="440" y="238" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#1b5e20" text-anchor="middle">③ HSV 阈值分割</text>
+  <text x="440" y="259" font-family="Consolas,monospace" font-size="11" fill="#1b5e20" text-anchor="middle">H ∈ [25, 45]   S ∈ [80, 255]   V ∈ [80, 255]</text>
+  <text x="440" y="277" font-family="Consolas,monospace" font-size="11" fill="#1b5e20" text-anchor="middle">输出二值掩码 (mask)，命中网球的荧光黄绿色</text>
+
+  <line x1="440" y1="288" x2="440" y2="313" stroke="#444" stroke-width="2"/>
+  <polygon points="436,309 444,309 440,317" fill="#444"/>
+
+  <rect x="200" y="318" width="480" height="74" rx="8" fill="#fff3e0" stroke="#e65100" stroke-width="2"/>
+  <text x="440" y="342" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#bf360c" text-anchor="middle">④ 形态学去毛刺</text>
+  <text x="440" y="363" font-family="Consolas,monospace" font-size="11" fill="#bf360c" text-anchor="middle">OPEN（5×5 椭圆核）→ 去散点 + CLOSE → 填充小空洞</text>
+  <text x="440" y="381" font-family="Consolas,monospace" font-size="11" fill="#bf360c" text-anchor="middle">得到平滑的网球区域块</text>
+
+  <line x1="440" y1="392" x2="440" y2="417" stroke="#444" stroke-width="2"/>
+  <polygon points="436,413 444,413 440,421" fill="#444"/>
+
+  <rect x="200" y="422" width="480" height="74" rx="8" fill="#f3e5f5" stroke="#6a1b9a" stroke-width="2"/>
+  <text x="440" y="446" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#4a148c" text-anchor="middle">⑤ 轮廓检测 + 面积过滤</text>
+  <text x="440" y="467" font-family="Consolas,monospace" font-size="11" fill="#4a148c" text-anchor="middle">findContours(RETR_EXTERNAL)，丢弃 area &lt; 30 像素的小斑点</text>
+  <text x="440" y="485" font-family="Consolas,monospace" font-size="11" fill="#4a148c" text-anchor="middle">按面积降序排序 → 最大 = 最近的球</text>
+
+  <line x1="440" y1="496" x2="440" y2="521" stroke="#444" stroke-width="2"/>
+  <polygon points="436,517 444,517 440,525" fill="#444"/>
+
+  <rect x="80" y="526" width="720" height="120" rx="8" fill="#fce4ec" stroke="#ad1457" stroke-width="2"/>
+  <text x="440" y="550" font-family="Consolas,monospace" font-size="14" font-weight="bold" fill="#880e4f" text-anchor="middle">⑥ 估计世界坐标 (est_bx, est_by, est_dist)</text>
+  <text x="440" y="572" font-family="Consolas,monospace" font-size="11" fill="#880e4f" text-anchor="middle">ball_angle_rad = atan(angle_norm × tan(FOV/2))     ← 精确反三角，非小角度近似</text>
+  <text x="440" y="592" font-family="Consolas,monospace" font-size="11" fill="#880e4f" text-anchor="middle">est_dist = (R_ball × W) / (2 × pixel_radius × tan(FOV/2))</text>
+  <text x="440" y="612" font-family="Consolas,monospace" font-size="11" fill="#880e4f" text-anchor="middle">est_bx = robot_x + est_dist × cos(robot_yaw + ball_angle_rad)</text>
+  <text x="440" y="632" font-family="Consolas,monospace" font-size="11" fill="#880e4f" text-anchor="middle">est_by = robot_y + est_dist × sin(robot_yaw + ball_angle_rad)</text>
+
+  <line x1="440" y1="646" x2="440" y2="671" stroke="#444" stroke-width="2"/>
+  <polygon points="436,667 444,667 440,675" fill="#444"/>
+
+  <line x1="440" y1="671" x2="220" y2="690" stroke="#444" stroke-width="1.5"/>
+  <polygon points="222,686 222,694 213,690" fill="#444"/>
+  <line x1="440" y1="671" x2="660" y2="690" stroke="#444" stroke-width="1.5"/>
+  <polygon points="658,686 658,694 667,690" fill="#444"/>
+
+  <rect x="40" y="692" width="360" height="60" rx="8" fill="#c8e6c9" stroke="#2e7d32" stroke-width="2"/>
+  <text x="220" y="715" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#1b5e20" text-anchor="middle">⑦-A 严格半场过滤</text>
+  <text x="220" y="736" font-family="Consolas,monospace" font-size="11" fill="#1b5e20" text-anchor="middle">est_bx 在己方半场（&gt;0 / &lt;0）→ 用于观测特征</text>
+
+  <rect x="480" y="692" width="360" height="60" rx="8" fill="#ffcdd2" stroke="#b71c1c" stroke-width="2"/>
+  <text x="660" y="715" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#b71c1c" text-anchor="middle">⑦-B 全部检测结果</text>
+  <text x="660" y="736" font-family="Consolas,monospace" font-size="11" fill="#b71c1c" text-anchor="middle">含对面半场球 → 用于「错误目标」惩罚判定</text>
+</svg>
