@@ -164,7 +164,7 @@ class RuleNavigator:
                 for _ in range(3):
                     self.sim.step()
                 if step > 0:
-                    print(f"  ✅ {label} 脱困完成 ({step} 步, min_dist={min_dist:.2f}m)")
+                    print(f"✅ {label} 脱困完成 ({step} 步, min_dist={min_dist:.2f}m)")
                 return True
 
             # 目标朝向：场地中心
@@ -189,7 +189,7 @@ class RuleNavigator:
         self._stop()
         for _ in range(3):
             self.sim.step()
-        print(f"  ⚠️ {label} 脱困超时 (max={max_steps} 步, min_dist={min_dist:.2f}m)")
+        print(f"⚠️ {label} 脱困超时 (max={max_steps} 步, min_dist={min_dist:.2f}m)")
         return False
 
     def _drive_to(self, smooth_angle, dist):
@@ -273,9 +273,9 @@ class RuleNavigator:
                             self._stop()
                             for _ in range(3):
                                 self.sim.step()
-                            print(f"  ⚠️ {label} 途中反复卡住 ({MAX_INFLIGHT_ESCAPES} 次脱困仍卡)，放弃")
+                            print(f"⚠️ {label} 途中反复卡住 ({MAX_INFLIGHT_ESCAPES} 次脱困仍卡)，放弃")
                             return False
-                        print(f"  🚧 {label} 途中卡住 "
+                        print(f"🚧 {label} 途中卡住 "
                               f"({STUCK_CHECK_EVERY} 步位移仅 {inflight_disp:.2f}m)，触发脱困")
                         self._escape_from_obstacle(safe_margin=1.5,
                                                    label=f"{label}-Mid#{inflight_escapes+1}")
@@ -289,7 +289,7 @@ class RuleNavigator:
         for _ in range(3):
             self.sim.step()
         self._refresh_debug_window()
-        print(f"  ⚠️ {label} 导航超时")
+        print(f"⚠️ {label} 导航超时")
         return False
 
     # -----------------------------------------------------------------

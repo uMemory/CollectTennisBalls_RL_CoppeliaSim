@@ -17,13 +17,6 @@ Gymnasium 环境：基于视觉感知的半场捡网球 RL 环境
 动作空间：7 个离散动作
 奖励函数：稠密引导 + 稀疏目标 + 边界/球网梯度惩罚
 
-依赖：
-  pip install gymnasium numpy opencv-python coppeliasim_zmqremoteapi_client
-
-运行前：
-  - CoppeliaSim 已打开场景（不要点 Play，由代码控制启动）
-  - YouBot + visionSensor 已在场景中
-  - Tennis_Generate.lua 可通过 sim.callScriptFunction 调用或手动执行
 """
 
 import math
@@ -40,7 +33,7 @@ from coppeliasim_zmqremoteapi_client import RemoteAPIClient
 #  常量配置
 # =====================================================================
 
-# ── 场地几何（与 lua 场景一致）──
+# ── 场地几何（与 场景一致）──
 COURT_LENGTH     = 23.77
 DOUBLES_WIDTH    = 10.97
 OUTER_LENGTH     = 36.57
@@ -78,7 +71,7 @@ BALL_RADIUS      = 0.1
 BALL_COUNT       = 12
 
 # ── 动作映射 ──
-# v2：加了 2 个后退动作（id 7、8），解决"背后有球时只能摇头"的局部最优问题
+# v2：加了 2 个后退动作（id 7、8）
 ACTION_MAP = {
     0: {'forward': 6.0, 'turn':  0.0},    # FORWARD
     1: {'forward': 4.0, 'turn':  1.5},    # FORWARD_LEFT
@@ -164,11 +157,11 @@ class TennisCollectorEnv(gym.Env):
             # 仿真未启动：先设置 stepping，再启动
             self.sim.setStepping(True)
             self.sim.startSimulation()
-            print("[rl_env] 仿真已启动（stepping 模式）")
+            print("[rl_env2] 仿真已启动（stepping 模式）")
         else:
             # 仿真已在运行（用户已点 Play）：直接切换到 stepping
             self.sim.setStepping(True)
-            print("[rl_env] 仿真已在运行，已切换到 stepping 模式")
+            print("[rl_env2] 仿真已在运行，已切换到 stepping 模式")
 
         # 等几步，让仿真稳定
         for _ in range(10):
@@ -195,9 +188,9 @@ class TennisCollectorEnv(gym.Env):
         self._spawner_script = self.sim.getScript(
             self.sim.scripttype_customizationscript, spawner_obj
         )
-        print("[rl_env] BallSpawner 脚本句柄已就绪")
-        print(f"[rl_env] 连接成功 | 初始姿态 ori={[f'{v:.3f}' for v in self._default_ori]}")
-        print(f"[rl_env] 初始位置 pos={[f'{v:.3f}' for v in self._default_pos]}")
+        print("[rl_env2] BallSpawner 脚本句柄已就绪")
+        print(f"[rl_env2] 连接成功 | 初始姿态 ori={[f'{v:.3f}' for v in self._default_ori]}")
+        print(f"[rl_env2] 初始位置 pos={[f'{v:.3f}' for v in self._default_pos]}")
 
     # =================================================================
     #  电机控制
@@ -527,7 +520,7 @@ class TennisCollectorEnv(gym.Env):
                     del self.current_ball_handles[name]
                     # 让仿真器把删除事件消化掉,再返回
                     self.sim.step()
-                    print(f"[rl_env] 消除 {name} (dist={dist:.3f}m)")
+                    print(f"[rl_env2] 消除 {name} (dist={dist:.3f}m)")
                     return True
             except Exception:
                 if name in self.current_ball_handles:
@@ -658,12 +651,12 @@ class TennisCollectorEnv(gym.Env):
             total = self._count_total_balls()
             if total == 0:
                 # 全场无球 → 重新生成
-                print("[rl_env] 全场无球，重新生成网球...")
+                print("[rl_env2] 全场无球，重新生成网球...")
                 self._respawn_balls(ball_count=BALL_COUNT)
             else:
                 # 当前半场无球但对面有球 → 切换半场
                 self.active_half = -self.active_half
-                print(f"[rl_env] 当前半场无球，切换到 {'X>0' if self.active_half > 0 else 'X<0'} 半场继续训练")
+                print(f"[rl_env2] 当前半场无球，切换到 {'X>0' if self.active_half > 0 else 'X<0'} 半场继续训练")
 
         self._reset_youbot()
 
@@ -812,7 +805,7 @@ class TennisCollectorEnv(gym.Env):
         通过 callScriptFunction 调用挂载在 Bin_Base 上的spawnBalls() Lua 函数，
         重新生成网球。seed=0 表示基于时间随机（由 Lua 端处理）。
         """
-        print(f"[rl_env] 全场无球，调用 Lua spawnBalls({ball_count}, seed={seed})...")
+        print(f"[rl_env2] 全场无球，调用 Lua spawnBalls({ball_count}, seed={seed})...")
         try:
             ret = self.sim.callScriptFunction(
                 'spawnBalls',  # 函数名
@@ -824,9 +817,9 @@ class TennisCollectorEnv(gym.Env):
             )
             # ret = (outInts, outFloats, outStrings, outBuffer)
             actual_count = ret[0][0] if ret and ret[0] else ball_count
-            print(f"[rl_env] 网球重生成完毕，共 {actual_count} 个")
+            print(f"[rl_env2] 网球重生成完毕，共 {actual_count} 个")
         except Exception as e:
-            print(f"[rl_env] spawnBalls 调用失败: {e}")
+            print(f"[rl_env2] spawnBalls 调用失败: {e}")
 
         # 等待物理引擎稳定后刷新句柄
         for _ in range(5):
@@ -864,7 +857,7 @@ class TennisCollectorEnv(gym.Env):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("[rl_env] TennisCollectorEnv 环境测试（随机动作）\n")
+    print("[rl_env2] TennisCollectorEnv 环境测试（随机动作）\n")
 
     print("使用步骤：")
     print("1. 打开 CoppeliaSim，加载网球场景")
@@ -886,7 +879,7 @@ if __name__ == "__main__":
 
     for episode in range(3):
         obs, info = env.reset()
-        print(f"\n[rl_env] Episode {episode + 1} | obs shape={obs.shape} | info={info}")
+        print(f"\n[rl_env2] Episode {episode + 1} | obs shape={obs.shape} | info={info}")
 
         total_reward = 0
         done = False
@@ -898,11 +891,11 @@ if __name__ == "__main__":
             done = terminated or truncated
 
             if env.step_count % 50 == 0:
-                print(f"[rl_env] step={env.step_count:4d} | reward={reward:+.2f} | "
+                print(f"[rl_env2] step={env.step_count:4d} | reward={reward:+.2f} | "
                       f"total={total_reward:+.1f} | info={info.get('reason', 'running')}")
 
-        print(f"[rl_env]✅ Episode 结束 | 总奖励={total_reward:+.1f} | "
+        print(f"[rl_env2]✅ Episode 结束 | 总奖励={total_reward:+.1f} | "
               f"reason={info.get('reason', '?')} | steps={env.step_count}")
 
     env.close()
-    print("\n[rl_env] 环境测试完成")
+    print("\n[rl_env2] 环境测试完成")

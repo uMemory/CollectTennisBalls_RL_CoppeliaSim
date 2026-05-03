@@ -5,12 +5,12 @@ Gymnasium 环境：基于视觉感知的半场捡网球 RL 环境
 
 架构设计：
   ┌─────────────────────────────────────────────┐
-  │  顶层调度（半场切换 + 绕网，规则代码）          │
+  │  顶层调度（半场切换 + 绕网，规则代码）             │
   ├─────────────────────────────────────────────┤
-  │  中层巡视（半场扫描确认无球，规则代码）          │
+  │  中层巡视（半场扫描确认无球，规则代码）             │
   ├─────────────────────────────────────────────┤
   │  底层 RL Agent（本环境）                       │
-  │  单 episode = 在当前半场内找到并消除一个球       │
+  │  单 episode = 在当前半场内找到并消除一个球        │
   └─────────────────────────────────────────────┘
 
 状态空间：10 维单帧 × 3 帧堆叠 = 30 维
@@ -158,11 +158,11 @@ class TennisCollectorEnv(gym.Env):
             # 仿真未启动：先设置 stepping，再启动
             self.sim.setStepping(True)
             self.sim.startSimulation()
-            print("[rl_env] 仿真已启动（stepping 模式）")
+            print("[rl_env1] 仿真已启动（stepping 模式）")
         else:
             # 仿真已在运行（用户已点 Play）：直接切换到 stepping
             self.sim.setStepping(True)
-            print("[rl_env] 仿真已在运行，已切换到 stepping 模式")
+            print("[rl_env1] 仿真已在运行，已切换到 stepping 模式")
 
         # 等几步，让仿真稳定
         for _ in range(10):
@@ -189,9 +189,9 @@ class TennisCollectorEnv(gym.Env):
         self._spawner_script = self.sim.getScript(
             self.sim.scripttype_customizationscript, spawner_obj
         )
-        print("[rl_env] BallSpawner 脚本句柄已就绪")
-        print(f"[rl_env] 连接成功 | 初始姿态 ori={[f'{v:.3f}' for v in self._default_ori]}")
-        print(f"[rl_env] 初始位置 pos={[f'{v:.3f}' for v in self._default_pos]}")
+        print("[rl_env1] BallSpawner 脚本句柄已就绪")
+        print(f"[rl_env1] 连接成功 | 初始姿态 ori={[f'{v:.3f}' for v in self._default_ori]}")
+        print(f"[rl_env1] 初始位置 pos={[f'{v:.3f}' for v in self._default_pos]}")
 
     # =================================================================
     #  电机控制
@@ -513,7 +513,7 @@ class TennisCollectorEnv(gym.Env):
                     del self.current_ball_handles[name]
                     # 让仿真器把删除事件消化掉,再返回
                     self.sim.step()
-                    print(f"[rl_env] 消除 {name} (dist={dist:.3f}m)")
+                    print(f"[rl_env1] 消除 {name} (dist={dist:.3f}m)")
                     return True
             except Exception:
                 if name in self.current_ball_handles:
@@ -644,12 +644,12 @@ class TennisCollectorEnv(gym.Env):
             total = self._count_total_balls()
             if total == 0:
                 # 全场无球 → 重新生成
-                print("[rl_env] 全场无球，重新生成网球...")
+                print("[rl_env1] 全场无球，重新生成网球...")
                 self._respawn_balls(ball_count=BALL_COUNT)
             else:
                 # 当前半场无球但对面有球 → 切换半场
                 self.active_half = -self.active_half
-                print(f"[rl_env] 当前半场无球，切换到 {'X>0' if self.active_half > 0 else 'X<0'} 半场继续训练")
+                print(f"[rl_env1] 当前半场无球，切换到 {'X>0' if self.active_half > 0 else 'X<0'} 半场继续训练")
 
         self._reset_youbot()
 
@@ -796,7 +796,7 @@ class TennisCollectorEnv(gym.Env):
         通过 callScriptFunction 调用挂载在 Bin_Base 上的spawnBalls() Lua 函数，
         重新生成网球。seed=0 表示基于时间随机（由 Lua 端处理）。
         """
-        print(f"[rl_env] 全场无球，调用 Lua spawnBalls({ball_count}, seed={seed})...")
+        print(f"[rl_env1] 全场无球，调用 Lua spawnBalls({ball_count}, seed={seed})...")
         try:
             ret = self.sim.callScriptFunction(
                 'spawnBalls',  # 函数名
@@ -808,7 +808,7 @@ class TennisCollectorEnv(gym.Env):
             )
             # ret = (outInts, outFloats, outStrings, outBuffer)
             actual_count = ret[0][0] if ret and ret[0] else ball_count
-            print(f"[rl_env] 网球重生成完毕，共 {actual_count} 个")
+            print(f"[rl_env1] 网球重生成完毕，共 {actual_count} 个")
         except Exception as e:
             print(f"[rl_env] spawnBalls 调用失败: {e}")
 
@@ -848,7 +848,7 @@ class TennisCollectorEnv(gym.Env):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("[rl_env] TennisCollectorEnv 环境测试（随机动作）\n")
+    print("[rl_env1] TennisCollectorEnv 环境测试（随机动作）\n")
 
     print("使用步骤：")
     print("1. 打开 CoppeliaSim，加载网球场景")
@@ -870,7 +870,7 @@ if __name__ == "__main__":
 
     for episode in range(3):
         obs, info = env.reset()
-        print(f"\n[rl_env] Episode {episode + 1} | obs shape={obs.shape} | info={info}")
+        print(f"\n[rl_env1] Episode {episode + 1} | obs shape={obs.shape} | info={info}")
 
         total_reward = 0
         done = False
@@ -882,11 +882,11 @@ if __name__ == "__main__":
             done = terminated or truncated
 
             if env.step_count % 50 == 0:
-                print(f"[rl_env] step={env.step_count:4d} | reward={reward:+.2f} | "
+                print(f"[rl_env1] step={env.step_count:4d} | reward={reward:+.2f} | "
                       f"total={total_reward:+.1f} | info={info.get('reason', 'running')}")
 
-        print(f"[rl_env]✅ Episode 结束 | 总奖励={total_reward:+.1f} | "
+        print(f"[rl_env1]✅ Episode 结束 | 总奖励={total_reward:+.1f} | "
               f"reason={info.get('reason', '?')} | steps={env.step_count}")
 
     env.close()
-    print("\n[rl_env] 环境测试完成")
+    print("\n[rl_env1] 环境测试完成")
