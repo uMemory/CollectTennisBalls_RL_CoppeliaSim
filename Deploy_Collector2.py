@@ -12,9 +12,9 @@ deploy_collector.py
       4. 重复
 
 巡视路线：
-  - 7 个路径点覆盖半场的近网区、中场、底线
-  - 从距 YouBot 最近的点切入，不浪费路程
-  - 正向走完后原路返回，正反两方向视野覆盖所有死角
+  - U 形 4 个角点（近网列 X=±5m + 底线列 X=±15.785m × Y=±7m）
+  - 从距 YouBot 最近的端点（点 0 或点 3）切入，单程走完不返回
+  - 三层 abort 过滤（est_dist < 5m + est_bx > 1.5/2.5m + 连续 3 次确认）
 
 用法：
   python deploy_collector.py --model ./models/best/best_model.zip
@@ -23,7 +23,7 @@ deploy_collector.py
 import argparse
 import math
 import time
-import datetime
+from datetime import datetime
 import collections
 import numpy as np
 from stable_baselines3 import PPO
@@ -57,7 +57,7 @@ NAV_MAX_ITER       = 2000
 NAV_LOOP_DT        = 0.05
 NAV_ALPHA          = 0.15
 BASE_SPEED         = 10.0
-TURN_SPEED         = 5.0
+TURN_SPEED         = 8.0    # ↑ 从 5.0 提升，转向更灵敏
 
 # ── RL 捡球阶段的"原地摇头"检测参数 ──
 # 当视野里没有当前半场的球（例如球藏在车背后）时，策略倾向原地摇头，
@@ -127,7 +127,69 @@ class RuleNavigator:
             diff += 2 * math.pi
         return diff
 
-    def _escape_from_obstacle(self, safe_margin=1.5, max_steps=200, label="Escape"):
+    def reorient_to_safe_center(self, active_half, max_steps=120, label="Reorient"):
+        """
+        吃完球后若 YouBot 处于危险区（贴网 / 贴边界），
+        原地转向 + 适当退离，让车头朝己方半场中心 (active_half · 4, 0)。
+
+        触发场景：RL 吃完一个球瞬间车仍在前进姿态，下一帧 RL 仍可能预测前进，
+        若刚好在边界附近会直接撞墙；先做一次小规模回正再交还 RL，
+        使 RL 接管时已处于"安全朝向 + 安全位置"。
+
+        与 _escape_from_obstacle 的区别：本方法门槛宽松（只在 < 1.5m 危险区触发），
+        最多 120 步轻量动作即返回；前者用于硬卡住后的强力恢复。
+        """
+        FENCE_LX_HALF = FENCE_LENGTH / 2
+        FENCE_LY_HALF = FENCE_WIDTH / 2
+        DANGER = 1.5
+
+        rx, ry, _ = self._get_pose()
+        net_dist = abs(rx)
+        min_bound = min(FENCE_LX_HALF - rx, rx + FENCE_LX_HALF,
+                        FENCE_LY_HALF - ry, ry + FENCE_LY_HALF)
+        if net_dist >= DANGER and min_bound >= DANGER:
+            return  # 不在危险区,无需回正
+
+        anchor_x = (1 if active_half > 0 else -1) * 4.0
+        anchor_y = 0.0
+
+        for step in range(max_steps):
+            rx, ry, ryaw = self._get_pose()
+            net_dist = abs(rx)
+            min_bound = min(FENCE_LX_HALF - rx, rx + FENCE_LX_HALF,
+                            FENCE_LY_HALF - ry, ry + FENCE_LY_HALF)
+            target_yaw = math.atan2(anchor_y - ry, anchor_x - rx)
+            angle_err = self._angle_diff(target_yaw, ryaw)
+
+            # 退出条件：车头偏差小 且 至少离危险 1.0m
+            if abs(angle_err) < math.radians(25) and net_dist >= 1.0 and min_bound >= 1.0:
+                self._stop()
+                for _ in range(3):
+                    self.sim.step()
+                if step > 0:
+                    print(f"✅ {label} 回正完成 ({step} 步, rx={rx:.2f}, yaw_err={math.degrees(angle_err):.0f}°)")
+                return
+
+            # 控制：偏差大就纯转向；偏差小但还贴边就低速后退 + 修正
+            if abs(angle_err) > math.radians(40):
+                v_turn = max(-TURN_SPEED, min(TURN_SPEED, 3.0 * angle_err))
+                self._set_motors(v_turn, -v_turn, v_turn, -v_turn)
+            else:
+                v_turn = max(-TURN_SPEED * 0.5, min(TURN_SPEED * 0.5, 2.0 * angle_err))
+                v_fwd = -1.5 if (net_dist < 1.0 or min_bound < 1.0) else 0.0
+                self._set_motors(v_fwd + v_turn, v_fwd - v_turn,
+                                 v_fwd + v_turn, v_fwd - v_turn)
+            self.sim.step()
+            if step % 5 == 0:
+                self._refresh_debug_window()
+
+        self._stop()
+        for _ in range(3):
+            self.sim.step()
+        print(f"⚠️ {label} 回正超时 ({max_steps} 步)")
+
+    def _escape_from_obstacle(self, safe_margin=1.5, max_steps=200, label="Escape",
+                              active_half=None):
         """
         若 YouBot 当前贴近边界 / 球网，先后退 + 转向场地中心脱困，再返回。
 
@@ -149,6 +211,17 @@ class RuleNavigator:
         FENCE_LX_HALF = FENCE_LENGTH / 2     # 19.285
         FENCE_LY_HALF = FENCE_WIDTH / 2      # 10.145
 
+        # 安全锚点：active_half 指定时锚定己方半场；否则按当前 X 符号
+        # 关键修复：原来朝 (0,0) 中心退会让贴网且跨过 X=0 的车朝着网的另一侧前进，
+        # 导致永远脱不了困。现在改朝 (anchor_sign · 4.0, ry) 半场内部安全点。
+        rx0, ry0, _ = self._get_pose()
+        if active_half is None:
+            anchor_sign = 1 if rx0 >= 0 else -1
+        else:
+            anchor_sign = 1 if active_half > 0 else -1
+        anchor_x = anchor_sign * 4.0
+        anchor_y = max(-5.0, min(5.0, ry0))
+
         for step in range(max_steps):
             rx, ry, ryaw = self._get_pose()
 
@@ -159,29 +232,38 @@ class RuleNavigator:
             dist_net  = abs(rx)
             min_dist = min(dist_xpos, dist_xneg, dist_ypos, dist_yneg, dist_net)
 
-            if min_dist >= safe_margin:
+            # 是否跨网到了错误半场（已脱离己方半场 0.5m 以上）
+            wrong_side = (anchor_sign > 0 and rx < 0.5) or (anchor_sign < 0 and rx > -0.5)
+
+            if min_dist >= safe_margin and not wrong_side:
                 self._stop()
                 for _ in range(3):
                     self.sim.step()
                 if step > 0:
-                    print(f"✅ {label} 脱困完成 ({step} 步, min_dist={min_dist:.2f}m)")
+                    print(f"✅ {label} 脱困完成 ({step} 步, min_dist={min_dist:.2f}m, rx={rx:.2f})")
                 return True
 
-            # 目标朝向：场地中心
-            target_yaw = math.atan2(-ry, -rx)
-            angle_err = self._angle_diff(target_yaw, ryaw)
-
-            if abs(angle_err) < math.radians(60):
-                # 车头大致朝向中心 → 前进 + 转向修正
-                v_turn = max(-TURN_SPEED, min(TURN_SPEED, 2.0 * angle_err))
-                v_fwd = 2.0
+            # 紧贴网（dist_net < 1.0）且车头朝向网 → 强制纯后退脱网，不转向
+            yaw_into_net = (anchor_sign > 0 and math.cos(ryaw) < -0.3) or \
+                           (anchor_sign < 0 and math.cos(ryaw) >  0.3)
+            if dist_net < 1.0 and yaw_into_net:
+                self._set_motors(-2.0, -2.0, -2.0, -2.0)
             else:
-                # 车头朝向障碍 → 后退（速度小）+ 边退边转
-                v_turn = max(-TURN_SPEED * 0.5, min(TURN_SPEED * 0.5, 1.0 * angle_err))
-                v_fwd = -1.5
+                # 目标朝向：己方半场安全锚点（不再是世界原点）
+                target_yaw = math.atan2(anchor_y - ry, anchor_x - rx)
+                angle_err = self._angle_diff(target_yaw, ryaw)
 
-            self._set_motors(v_fwd + v_turn, v_fwd - v_turn,
-                             v_fwd + v_turn, v_fwd - v_turn)
+                if abs(angle_err) < math.radians(50):
+                    # 车头大致朝向锚点 → 前进 + 转向修正
+                    v_turn = max(-TURN_SPEED, min(TURN_SPEED, 2.0 * angle_err))
+                    v_fwd = 2.0
+                else:
+                    # 偏角太大 → 边后退边转
+                    v_turn = max(-TURN_SPEED * 0.6, min(TURN_SPEED * 0.6, 1.2 * angle_err))
+                    v_fwd = -1.5
+                self._set_motors(v_fwd + v_turn, v_fwd - v_turn,
+                                 v_fwd + v_turn, v_fwd - v_turn)
+
             self.sim.step()
             if step % 5 == 0:
                 self._refresh_debug_window()
@@ -189,26 +271,36 @@ class RuleNavigator:
         self._stop()
         for _ in range(3):
             self.sim.step()
-        print(f"⚠️ {label} 脱困超时 (max={max_steps} 步, min_dist={min_dist:.2f}m)")
+        print(f"⚠️ {label} 脱困超时 (max={max_steps} 步, min_dist={min_dist:.2f}m, rx={rx:.2f})")
         return False
 
     def _drive_to(self, smooth_angle, dist):
         # 控制增益：
-        #   TURN_KP 越大转向越激进；过大会震荡。3.0 是在稳定/响应之间的折中
-        #   FWD_KP 越大接近目标时减速越早
-        FWD_KP, TURN_KP = 1.5, 2.0
+        # TURN_KP 越大转向越激进；过大会震荡。
+        TURN_KP = 2.5
         FWD_MAX, TURN_MAX = BASE_SPEED, TURN_SPEED
         v_turn = max(-TURN_MAX, min(TURN_MAX, TURN_KP * smooth_angle))
         if abs(smooth_angle) > math.radians(90):
-            # 角度偏差 > 90° → 纯转向（原地转,不前进）
+            # 角度偏差 > 90° → 纯转向（原地转，不前进）
             self._set_motors(v_turn, -v_turn, v_turn, -v_turn)
         else:
-            v_fwd = max(0.3, min(FWD_MAX, FWD_KP * dist * math.cos(smooth_angle)))
+            # 远距离全速；近距离（< 2m）线性减速避免过冲
+            # —— 修复：之前直接 FWD_MAX 全速到点会过冲，巡视点判定 dist<1.0
+            # 才停，惯性导致 YouBot 滑过点；现在按距离平滑减速
+            APPROACH_DIST = 2.0   # 距离 ≤ 此值开始减速
+            APPROACH_MIN  = 1.5   # 接近时最低速度（保证仍能越过摩擦力）
+            if dist >= APPROACH_DIST:
+                v_fwd = FWD_MAX
+            else:
+                # 在 [APPROACH_MIN, FWD_MAX] 之间线性插值
+                v_fwd = APPROACH_MIN + (FWD_MAX - APPROACH_MIN) * (dist / APPROACH_DIST)
+            # 角度偏差还存在时降低前进分量，让转向先到位
+            v_fwd *= max(0.4, math.cos(smooth_angle))
             self._set_motors(v_fwd + v_turn, v_fwd - v_turn,
                              v_fwd + v_turn, v_fwd - v_turn)
 
     def navigate_to(self, tx, ty, reach_dist=WAYPOINT_REACHED, label="WP",
-                    abort_check=None, abort_check_every=15):
+                    abort_check=None, abort_check_every=15, active_half=None):
         """导航到目标点，返回 True=到达、False=超时、"aborted"=被 abort_check 中断。
 
         注意: 仿真处于 stepping 模式（env 初始化时设置），
@@ -278,7 +370,8 @@ class RuleNavigator:
                         print(f"🚧 {label} 途中卡住 "
                               f"({STUCK_CHECK_EVERY} 步位移仅 {inflight_disp:.2f}m)，触发脱困")
                         self._escape_from_obstacle(safe_margin=1.5,
-                                                   label=f"{label}-Mid#{inflight_escapes+1}")
+                                                   label=f"{label}-Mid#{inflight_escapes+1}",
+                                                   active_half=active_half)
                         inflight_escapes += 1
                         # 脱困后位置已变，重置平滑误差与位置基准
                         smooth_err = None
@@ -307,6 +400,7 @@ class RuleNavigator:
           RL agent 接管后会边走边找球，比规则代码直线拉回 Y=0 更有效
         """
         # 绕网前先脱困：同 patrol_half，避免贴墙状态下规则导航撞墙超时
+        # bypass 阶段还没跨网，按当前 rx 符号决定锚点方向（即"先离开当前网侧的网"）
         self._escape_from_obstacle(safe_margin=1.5, label="Pre-Bypass")
 
         rx, ry, _ = self._get_pose()
@@ -337,48 +431,51 @@ class RuleNavigator:
 
     def _build_patrol_points(self, active_half):
         """
-        构建半场 S 形巡视路径点（6 个点，覆盖三个纵深层）。
+        构建半场 U 形巡视路径点（4 个角点，单程覆盖）。
 
-        每层从一侧横扫到另一侧，层间纵向前进，形成 S 形。
-        删除了中间点（中场中央、底线中央），因为 YouBot 从 Y- 侧走到
-        Y+ 侧的直线本身就经过中央，加中间点只是多停顿、没有视野增益。
+        因 x_near 推到 4.0m 后，原本 6 点 S 形中的 x_mid 列已被 x_near 与 x_far
+        两列的 FOV 视锥充分覆盖，属于冗余。简化为 4 个角点 U 形。
 
         俯视图（X>0 半场为例，Y+ 在左，Y- 在右）:
 
                         Y+                      Y-
                        │                       │
-            5 ←────────┼────────── 4   x_far  (底线)
-                       │           ↑
-                       │           │
-            2 ─────────┼─────────→ 3   x_mid  (中场)
-            ↑          │
-            │          │
-            1 ←────────┼────────── 0     x_near (近网)
+            2 ←────────┼────────── 3   x_far  (底线)
+            ↑          │           ↑
+            │          │           │
+            │          │           │     x_near (近网)
+            │          │           │
+            1          │           0
                        │
           ─────────────┼────────── X=0 (球网)
 
-        路线: 0(近网,Y-) → 1(近网,Y+) → 2(中场,Y+)
-              → 3(中场,Y-) → 4(底线,Y-) → 5(底线,Y+)
+        路线: 0(近网,Y-) → 1(近网,Y+) → 2(底线,Y+) → 3(底线,Y-)
+        各段视野：
+          0→1: yaw=+π/2，沿 +Y 扫描近网 X≈[1, 7] 区域
+          1→2: yaw=0   ，沿 +X 扫描 Y≈+7 上方半带
+          2→3: yaw=-π/2，沿 -Y 扫描底线 X≈[14, 19] 区域
+        覆盖损失：X∈[8, 13] 且 |Y|<3 的中央死区不直接入 FOV，
+        这片区域球较少（RL 正常捡球时本身会扫到，全场无球时 spawnBalls 重置）。
 
-        就近切入规则：只比较到点 0 和点 5 的距离，
-        从更近的端点开始，保证完整覆盖所有路径点。
+        就近切入规则：只比较到点 0 和点 3 的距离（两端点都在近网侧），
+        从更近的端点开始，单程走完 4 个点。
         """
         sign = active_half
-        x_near = sign * 2.5
-        x_mid = sign * (HALF_COURT_X_MAX / 2)
-        x_far = sign * (HALF_COURT_X_MAX - 1.5)
-        # 巡视 Y 边界：椅子占用 |Y| ∈ [7.72, 8.55]，
-        # 取 |Y| = 7.0 距椅子 0.72m，与绕网走廊 Y=7.05 也一致
+        # x_near=5.0：近网列离网 5m，对面贴网球与 YouBot 视线夹角 > 50°，
+        # 远超 FOV 半角 37.5°，对面贴网球进 FOV 的概率几乎为零
+        x_near = sign * 5.0
+        # x_far：底线列离围栏 3.5m（HALF_COURT_X_MAX≈18.285，减 2.5），
+        # 即便 P 控导航有 0.5m 误差或惯性飘移，仍有 3m 余量，避免撞围栏
+        x_far  = sign * (HALF_COURT_X_MAX - 2.5)
+        # Y 边界：椅子占用 |Y| ∈ [7.72, 8.55]，取 |Y|=7.0 留 0.72m 余量
         y_pos = 7.0
         y_neg = -7.0
 
         points = [
-            (x_near, y_neg),     # 0: 近网 Y- 侧（S 起点）
+            (x_near, y_neg),     # 0: 近网 Y- 侧（U 起点）
             (x_near, y_pos),     # 1: 近网 Y+ 侧
-            (x_mid,  y_pos),     # 2: 中场 Y+ 侧
-            (x_mid,  y_neg),     # 3: 中场 Y- 侧
-            (x_far,  y_neg),     # 4: 底线 Y- 侧
-            (x_far,  y_pos),     # 5: 底线 Y+ 侧（S 终点）
+            (x_far,  y_pos),     # 2: 底线 Y+ 侧
+            (x_far,  y_neg),     # 3: 底线 Y- 侧（U 终点）
         ]
         return points
 
@@ -404,7 +501,8 @@ class RuleNavigator:
         """
         # 巡视前先脱困：避免上一轮 stuck_at_boundary / stuck_at_net 残留贴墙状态
         # 导致 navigate_to 一直撞墙超时
-        self._escape_from_obstacle(safe_margin=1.5, label="Pre-Patrol")
+        self._escape_from_obstacle(safe_margin=1.5, label="Pre-Patrol",
+                                   active_half=active_half)
 
         rx, ry, _ = self._get_pose()
         points = self._build_patrol_points(active_half)
@@ -436,30 +534,41 @@ class RuleNavigator:
         #      而非仅仅跨过 X=0，这样网边模糊区的球不会触发中断
         #   B. 连续确认：要求连续 PATROL_ABORT_CONFIRM 次检测都报告有球才中断，
         #      过滤相机噪声/单帧误检
-        PATROL_EST_BX_MARGIN   = 1.0   # 方案 A：球 est_bx 到己方半场至少 1.0m
-        PATROL_ABORT_CONFIRM   = 3     # 方案 B：连续 3 次检测到才中断（~2.25s 仿真）
+        # ── Abort 过滤设计（三层保险）──
+        # (1) est_dist 上限：只信"近距离"检测
+        #     像素面积反算距离的相对误差约 30-40%，所以 est_bx 的绝对误差与真实距离
+        #     线性相关。对面贴网球到 YouBot 真实距离常 5-10m，误差 1.5-4m，能蒙过
+        #     est_bx margin。限制 est_dist < 5m 后，est_bx 误差 < 1.5m，过滤可靠，
+        #     对面远距离的球（无论 est_bx 算成什么）一律不参与 abort 判定。
+        # (2) est_bx 安全 margin：球必须明显在己方半场内 ≥ 1.5m（贴网时 ≥ 2.5m）
+        # (3) 连续确认：连续 3 次检测一致才 abort，过滤单帧噪声
+        PATROL_EST_DIST_MAX       = 5.0   # 球估计距离 < 此值才参与判定
+        PATROL_EST_BX_MARGIN_FAR  = 1.5   # YouBot 远离网时
+        PATROL_EST_BX_MARGIN_NEAR = 2.5   # YouBot 靠近网（abs(rx)<2.0）时
+        PATROL_ABORT_CONFIRM      = 3     # 连续 3 次检测才中断（~2.25s 仿真）
 
-        confirm_counter = [0]  # 用 list 包一层以便闭包修改
+        confirm_counter = [0]
 
         def _ball_detected():
             if self.env is None:
                 return False
             try:
                 self.env._build_single_obs()
-                # 默认 _build_single_obs 已经按 strict=True (est_bx > 0) 过滤
-                # 这里再重新扫一遍 balls_all,用更严格的阈值二次过滤
                 balls_all = getattr(self.env, '_last_balls_all', [])
-                active = self.env.active_half
-                has_confident_ball = False
-                for b in balls_all:
-                    est_bx = b.get('est_bx', 0.0)
-                    if active > 0 and est_bx > PATROL_EST_BX_MARGIN:
-                        has_confident_ball = True
-                        break
-                    if active < 0 and est_bx < -PATROL_EST_BX_MARGIN:
-                        has_confident_ball = True
-                        break
-                if has_confident_ball:
+                if not balls_all:
+                    confirm_counter[0] = 0
+                    return False
+                rx_now, _, _ = self._get_pose()
+                margin = PATROL_EST_BX_MARGIN_NEAR if abs(rx_now) < 2.0 \
+                         else PATROL_EST_BX_MARGIN_FAR
+                # 三重过滤：est_dist 近 + est_bx 在己方深处
+                has_ball = any(
+                    b.get('est_dist', 99.0) < PATROL_EST_DIST_MAX and
+                    ((active_half > 0 and b.get('est_bx', 0.0) >  margin) or
+                     (active_half < 0 and b.get('est_bx', 0.0) < -margin))
+                    for b in balls_all
+                )
+                if has_ball:
                     confirm_counter[0] += 1
                 else:
                     confirm_counter[0] = 0
@@ -480,6 +589,7 @@ class RuleNavigator:
                 # 每 15 个 sim.step 检查一次（~0.75s 仿真），避免 ZMQ 调用过密
                 # 导致 CoppeliaSim server 过载崩溃
                 abort_check_every=15,
+                active_half=active_half,
             )
             if result == "aborted":
                 print(f"🎾 巡视途中发现当前半场的球，中断巡视交给 RL")
@@ -613,6 +723,18 @@ def deploy(model_path, max_rounds=30):
         grace_steps_remaining = POST_PATROL_GRACE if patrol_just_found_ball else 0
         patrol_just_found_ball = False  # 用过即清
 
+        # ── 安全 override 参数 ──
+        # 单步检查（之前的 sticky lock 因不区分前进/后退动作导致莫名连续后退）。
+        # 关键：一定要按 **实际运动方向** 判断，不是车头朝向：
+        #   * 动作 0/1/2 前进类 → 运动方向 ≈ yaw
+        #   * 动作 7/8 后退类   → 运动方向 ≈ yaw + π （车头反方向）
+        #   * 动作 3-6 纯转向   → 无平移，永远安全
+        # 触发条件改为"运动方向指向危险" + 距危险 < 阈值，提前到 1.2m / 0.8m。
+        NET_DANGER_DIST       = 1.2
+        BOUND_DANGER_DIST     = 0.8
+        FENCE_LX_HALF = FENCE_LENGTH / 2
+        FENCE_LY_HALF = FENCE_WIDTH / 2
+
         while not done:
             action, _ = model.predict(obs, deterministic=True)
             action = int(action)
@@ -629,6 +751,61 @@ def deploy(model_path, max_rounds=30):
                     switch_count = 0
                 else:
                     final_action = last_action  # 还没确认够,维持上一个动作
+
+            # ── 安全 override（基于实际运动方向，单步检查）──
+            rx_check, ry_check, ryaw_check = env._get_youbot_pose()
+            cos_yaw, sin_yaw = math.cos(ryaw_check), math.sin(ryaw_check)
+
+            # 计算动作的"实际运动方向"（不是车头方向）
+            if final_action in (0, 1, 2):
+                move_cos, move_sin = cos_yaw, sin_yaw
+            elif final_action in (7, 8):
+                move_cos, move_sin = -cos_yaw, -sin_yaw
+            else:
+                # 纯转向 (3/4/5/6) 不平移，必定安全
+                move_cos, move_sin = 0.0, 0.0
+
+            # ── 检查"眼前确认有己方半场近距离球" → 临时收紧安全半径 ──
+            # 痛点：球紧贴网（己方）时，1.2m 网保护会持续触发，让 RL 永远捡不到。
+            # 解决：当 obs 显示"球可见 + 较大 + 在视野中央"，把 NET_DANGER_DIST
+            # 从 1.2m 降到 0.4m。0.4m 仍 < ELIM_DIST，物理上保证不会越网。
+            # 触发条件三选一全满足：
+            #   ball_detected (env 严格过滤已通过)
+            #   ball_size > 0.20 (图像面积 > ~6280 px，对应距离约 4-5m 内)
+            #   |ball_angle| < 0.4 (在视野中央 ±~25°)
+            recent_obs = obs[-10:]
+            ball_det_now = recent_obs[0] > 0.5
+            ball_ang_now = float(recent_obs[1])
+            ball_sz_now  = float(recent_obs[2])
+            imminent_own_ball = (ball_det_now and
+                                 ball_sz_now > 0.20 and
+                                 abs(ball_ang_now) < 0.4)
+            effective_net_danger   = 0.4 if imminent_own_ball else NET_DANGER_DIST
+            effective_bound_danger = 0.4 if imminent_own_ball else BOUND_DANGER_DIST
+
+            danger_net = abs(rx_check) < effective_net_danger and (
+                (active_half > 0 and move_cos < -0.15) or
+                (active_half < 0 and move_cos >  0.15)
+            )
+            danger_xpos = (FENCE_LX_HALF - rx_check) < effective_bound_danger and move_cos > 0.15
+            danger_xneg = (rx_check + FENCE_LX_HALF) < effective_bound_danger and move_cos < -0.15
+            danger_ypos = (FENCE_LY_HALF - ry_check) < effective_bound_danger and move_sin > 0.15
+            danger_yneg = (ry_check + FENCE_LY_HALF) < effective_bound_danger and move_sin < -0.15
+
+            if danger_net or danger_xpos or danger_xneg or danger_ypos or danger_yneg:
+                # 选择转向方向：朝己方半场中央 (active_half·4, 0)
+                anchor_x = (1 if active_half > 0 else -1) * 4.0
+                target_yaw = math.atan2(0.0 - ry_check, anchor_x - rx_check)
+                angle_err = ((target_yaw - ryaw_check + math.pi) % (2 * math.pi)) - math.pi
+                # 转向动作（无平移），按偏差方向选大小
+                if angle_err > 0:
+                    safe_action = 5 if abs(angle_err) > math.radians(45) else 3
+                else:
+                    safe_action = 6 if abs(angle_err) > math.radians(45) else 4
+                kind = "网" if danger_net else "边界"
+                print(f"🛡️ {kind}保护: rx={rx_check:.2f} ry={ry_check:.2f} "
+                      f"a({final_action})→a({safe_action})")
+                final_action = safe_action
 
             obs, reward, terminated, truncated, info = env.step(final_action)
             last_action = final_action
@@ -680,6 +857,9 @@ def deploy(model_path, max_rounds=30):
             total_collected += 1
             no_ball_streak = 0
             print(f"✅ 捡到球！(奖励={ep_reward:+.1f}, 步数={info['step']})")
+            # 吃完球若车在危险区（贴边界/贴网），先回正再交还 RL，避免下一帧
+            # RL 仍以"前进姿态"惯性撞墙
+            navigator.reorient_to_safe_center(active_half)
         else:
             no_ball_streak += 1
             print(f"❌ 未捡到 (原因={info.get('reason', '?')}, "
