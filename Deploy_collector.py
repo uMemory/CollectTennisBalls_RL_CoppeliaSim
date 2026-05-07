@@ -459,7 +459,7 @@ def deploy(model_path, max_rounds=30):
 
         if stuck_triggered:
             # 卡住不计入 RL 失败，直接巡视打破僵局
-            print(f"  🔍 卡住触发：执行巡视寻找球...")
+            print(f"🔍 卡住触发：执行巡视寻找球...")
             found = navigator.patrol_half(active_half)
             if found:
                 patrol_just_found_ball = True
