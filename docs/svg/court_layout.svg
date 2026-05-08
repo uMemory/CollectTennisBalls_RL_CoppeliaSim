@@ -2,7 +2,7 @@
 
   <!-- 围栏（灰色虚线，扩大到 920×400 让 回收仓 标签完全在内部）-->
   <rect x="20" y="20" width="850" height="400" fill="#f5f5f5" stroke="#666" stroke-width="2" stroke-dasharray="6 4"/>
-  <text x="28" y="35" font-family="Consolas,monospace" font-size="11" fill="#666">围栏 38.57 × 20.29 m</text>
+  <text x="28" y="35" font-family="Consolas,monospace" font-size="12" fill="#666">围栏 38.57 × 20.29 m</text>
 
   <!-- 场地外部背景（向下平移 20px 实现垂直居中：原 y=40 → y=60）-->
   <rect x="40" y="60" width="800" height="320" fill="#7cb342" fill-opacity="0.20" stroke="#558b2f" stroke-width="1.5"/>
@@ -15,7 +15,7 @@
   <rect x="180" y="124" width="520" height="192" fill="#7cb342" fill-opacity="0.45" stroke="#33691e" stroke-width="1.5"/>
 
   <!-- 半场标题（移入球场上方，远离顶部杂乱区） -->
-  <text x="220" y="148" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#0d47a1" text-anchor="middle">X &lt; 0 半场（active_half = -1）</text>
+  <text x="218" y="148" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#0d47a1" text-anchor="middle">X &lt; 0 半场（active_half = -1）</text>
   <text x="680" y="148" font-family="Consolas,monospace" font-size="13" font-weight="bold" fill="#bf360c" text-anchor="middle">X &gt; 0 半场（active_half = +1）</text>
 
   <!-- 绕网走廊（虚线蓝） -->
@@ -26,7 +26,7 @@
 
   <!-- 球网 -->
   <line x1="440" y1="60" x2="440" y2="380" stroke="#d32f2f" stroke-width="3"/>
-  <text x="446" y="58" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#b71c1c">球网 X=0</text>
+  <text x="440" y="56" font-family="Consolas,monospace" font-size="12" font-weight="bold" fill="#b71c1c">球网 X=0</text>
 
   <!-- 网柱 -->
   <circle cx="440" cy="108" r="5" fill="#000"/>
@@ -41,8 +41,8 @@
   <text x="392" y="370" font-family="Consolas,monospace" font-size="10" fill="#3e2723" text-anchor="end">长椅 #1</text>
 
   <!-- 回收仓（合并为单行标签，右对齐避免溢出） -->
-  <rect x="822" y="60" width="18" height="18" fill="#fb8c00" stroke="#e65100" stroke-width="1.5"/>
-  <text x="840" y="55" font-family="Consolas,monospace" font-size="10" font-weight="bold" fill="#bf360c" text-anchor="end">📦 回收仓 (17.9, 8.6) 0.8×1m</text>
+  <rect x="816" y="60" width="24" height="24" fill="#fb8c00" stroke="#e65100" stroke-width="1.5"/>
+  <text x="840" y="55" font-family="Consolas,monospace" font-size="12" font-weight="bold" fill="#bf360c" text-anchor="end">📦 回收仓 (17.9, 8.6) 0.8×1m</text>
 
   <!-- X>0 半场巡视 U 形（橙色）：x_near=5m → 屏幕 550；x_far=15.785 → 787 -->
   <line x1="550" y1="342" x2="550" y2="98" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
@@ -74,9 +74,10 @@
   <circle cx="93"  cy="342" r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
   <text x="93"  y="346" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
 
-  <!-- 绕网路径示意（蓝色） -->
-  <circle cx="374" cy="220" r="6" fill="#1976d2"/>
-  <text x="352" y="244" font-family="Consolas,monospace" font-size="10" fill="#0d47a1">绕网起点</text>
+  <!-- 绕网路径示意（蓝色，仅为一个示例；实际起点 = bypass 触发时 YouBot 的当前位置）-->
+  <circle cx="374" cy="220" r="6" fill="#1976d2" fill-opacity="0.4" stroke="#1976d2" stroke-width="1.5" stroke-dasharray="2 2"/>
+  <text x="352" y="244" font-family="Consolas,monospace" font-size="10" fill="#0d47a1">示例起点</text>
+  <text x="312" y="256" font-family="Consolas,monospace" font-size="9" fill="#1565c0" font-style="italic">(实际起点 = YouBot 当前位置)</text>
   <line x1="374" y1="220" x2="374" y2="100" stroke="#1976d2" stroke-width="2.5"/>
   <polygon points="370,104 378,104 374,96" fill="#1976d2"/>
   <line x1="374" y1="97" x2="504" y2="97" stroke="#1976d2" stroke-width="2.5"/>
@@ -87,15 +88,15 @@
   <!-- 图例（下移避开扩大后的围栏底部） -->
   <rect x="20" y="430" width="850" height="65" fill="#fafafa" stroke="#bdbdbd" stroke-width="1"/>
   <circle cx="36" cy="448" r="7" fill="#ff5722"/>
-  <text x="50" y="452" font-family="Consolas,monospace" font-size="11" fill="#333">X&gt;0 半场巡视 U 形 (0→1→2→3)</text>
+  <text x="50" y="452" font-family="Consolas,monospace" font-size="13" fill="#333">X&gt;0 半场巡视 U 形 (0→1→2→3)</text>
   <circle cx="276" cy="448" r="7" fill="#8e24aa"/>
-  <text x="290" y="452" font-family="Consolas,monospace" font-size="11" fill="#333">X&lt;0 半场巡视（镜像）</text>
+  <text x="290" y="452" font-family="Consolas,monospace" font-size="13" fill="#333">X&lt;0 半场巡视（镜像）</text>
   <circle cx="468" cy="448" r="6" fill="#1976d2"/>
-  <text x="482" y="452" font-family="Consolas,monospace" font-size="11" fill="#333">绕网路径</text>
+  <text x="482" y="452" font-family="Consolas,monospace" font-size="13" fill="#333">绕网路径</text>
   <rect x="566" y="444" width="14" height="8" fill="#5d4037"/>
-  <text x="586" y="452" font-family="Consolas,monospace" font-size="11" fill="#333">长椅</text>
+  <text x="586" y="452" font-family="Consolas,monospace" font-size="13" fill="#333">长椅</text>
   <rect x="624" y="442" width="12" height="12" fill="#fb8c00" stroke="#e65100"/>
-  <text x="642" y="452" font-family="Consolas,monospace" font-size="11" fill="#333">回收仓</text>
-  <text x="36" y="475" font-family="Consolas,monospace" font-size="10" fill="#555">巡视规则：每次进入半场时，比较 YouBot 到点 0 与点 3 的距离，从更近端点开始单程走完 4 个点；</text>
-  <text x="36" y="488" font-family="Consolas,monospace" font-size="10" fill="#555">途中检测到当前半场内的球立即中断，交还 RL Agent。</text>
+  <text x="642" y="452" font-family="Consolas,monospace" font-size="13" fill="#333">回收仓</text>
+  <text x="36" y="475" font-family="Consolas,monospace" font-size="12" fill="#555">巡视规则：每次进入半场时，比较 YouBot 到点 0 与点 3 的距离，从更近端点开始单程走完 4 个点；</text>
+  <text x="36" y="488" font-family="Consolas,monospace" font-size="12" fill="#555">途中检测到当前半场内的球立即中断，交还 RL Agent。</text>
 </svg>
