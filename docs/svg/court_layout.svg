@@ -44,35 +44,36 @@
   <rect x="816" y="60" width="24" height="24" fill="#fb8c00" stroke="#e65100" stroke-width="1.5"/>
   <text x="840" y="55" font-family="Consolas,monospace" font-size="12" font-weight="bold" fill="#bf360c" text-anchor="end">📦 回收仓 (17.9, 8.6) 0.8×1m</text>
 
-  <!-- X>0 半场巡视 U 形（橙色）：x_near=5m → 屏幕 550；x_far=15.785 → 787 -->
-  <line x1="550" y1="342" x2="550" y2="98" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="550" y1="98"  x2="787" y2="98" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="787" y1="98"  x2="787" y2="342" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
-  <polygon points="783,330 791,330 787,342" fill="#ff5722"/>
+  <!-- X>0 半场巡视 C 形（橙色）：0(near,Y-)→1(far,Y-)→2(far,Y+)→3(near,Y+) -->
+  <!-- x_near=5m → 屏幕 550；x_far=15.785 → 787 -->
+  <line x1="550" y1="342" x2="787" y2="342" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
+  <line x1="787" y1="342" x2="787" y2="98" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
+  <line x1="787" y1="98"  x2="550" y2="98" stroke="#ff5722" stroke-width="2.5" stroke-opacity="0.9"/>
+  <polygon points="562,94 562,102 550,98" fill="#ff5722"/>
 
   <circle cx="550" cy="342" r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
   <text x="550" y="346" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">0</text>
-  <circle cx="550" cy="98"  r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
-  <text x="550" y="102" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">1</text>
+  <circle cx="787" cy="342" r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
+  <text x="787" y="346" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">1</text>
   <circle cx="787" cy="98"  r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
   <text x="787" y="102" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">2</text>
-  <circle cx="787" cy="342" r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
-  <text x="787" y="346" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
+  <circle cx="550" cy="98"  r="11" fill="#ff5722" stroke="#fff" stroke-width="2"/>
+  <text x="550" y="102" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
 
-  <!-- X<0 半场巡视 U 形（紫色，镜像） -->
-  <line x1="330" y1="342" x2="330" y2="98" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="330" y1="98"  x2="93"  y2="98" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
-  <line x1="93"  y1="98"  x2="93"  y2="342" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
-  <polygon points="89,330 97,330 93,342" fill="#8e24aa"/>
+  <!-- X<0 半场巡视 C 形（紫色，镜像）：0(near,Y-)→1(far,Y-)→2(far,Y+)→3(near,Y+) -->
+  <line x1="330" y1="342" x2="93"  y2="342" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
+  <line x1="93"  y1="342" x2="93"  y2="98" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
+  <line x1="93"  y1="98"  x2="330" y2="98" stroke="#8e24aa" stroke-width="2.5" stroke-opacity="0.9"/>
+  <polygon points="318,94 318,102 330,98" fill="#8e24aa"/>
 
   <circle cx="330" cy="342" r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
   <text x="330" y="346" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">0</text>
-  <circle cx="330" cy="98"  r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
-  <text x="330" y="102" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">1</text>
+  <circle cx="93"  cy="342" r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
+  <text x="93"  y="346" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">1</text>
   <circle cx="93"  cy="98"  r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
   <text x="93"  y="102" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">2</text>
-  <circle cx="93"  cy="342" r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
-  <text x="93"  y="346" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
+  <circle cx="330" cy="98"  r="11" fill="#8e24aa" stroke="#fff" stroke-width="2"/>
+  <text x="330" y="102" font-family="Consolas,monospace" font-size="11" font-weight="bold" fill="#fff" text-anchor="middle">3</text>
 
   <!-- 绕网路径示意（蓝色，仅为一个示例；实际起点 = bypass 触发时 YouBot 的当前位置）-->
   <circle cx="374" cy="220" r="6" fill="#1976d2" fill-opacity="0.4" stroke="#1976d2" stroke-width="1.5" stroke-dasharray="2 2"/>
@@ -88,7 +89,7 @@
   <!-- 图例（下移避开扩大后的围栏底部） -->
   <rect x="20" y="430" width="850" height="65" fill="#fafafa" stroke="#bdbdbd" stroke-width="1"/>
   <circle cx="36" cy="448" r="7" fill="#ff5722"/>
-  <text x="50" y="452" font-family="Consolas,monospace" font-size="13" fill="#333">X&gt;0 半场巡视 U 形 (0→1→2→3)</text>
+  <text x="50" y="452" font-family="Consolas,monospace" font-size="13" fill="#333">X&gt;0 半场巡视 C 形 (0→1→2→3)</text>
   <circle cx="276" cy="448" r="7" fill="#8e24aa"/>
   <text x="290" y="452" font-family="Consolas,monospace" font-size="13" fill="#333">X&lt;0 半场巡视（镜像）</text>
   <circle cx="468" cy="448" r="6" fill="#1976d2"/>
