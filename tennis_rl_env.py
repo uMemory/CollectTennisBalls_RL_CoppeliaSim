@@ -627,6 +627,12 @@ class TennisCollectorEnv(gym.Env):
         )
         cv2.putText(debug_img, info_text, (10, 25),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        # 首次显示时声明 WINDOW_NORMAL → 窗口可自由拖拽缩放
+        if not getattr(self, '_debug_window_inited', False):
+            cv2.namedWindow("TennisRL Debug",
+                            cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)
+            cv2.resizeWindow("TennisRL Debug", 800, 480)
+            self._debug_window_inited = True
         cv2.imshow("TennisRL Debug", debug_img)
         cv2.waitKey(1)
 
