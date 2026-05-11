@@ -616,13 +616,22 @@ class TennisCollectorEnv(gym.Env):
 
     def _render_debug(self, img_bgr, balls):
         debug_img = img_bgr.copy()
+        # 字号放大 + 加粗 + 黑色描边，并且文字画在 1024×614 原始图像上，
+        # 配合 WINDOW_KEEPRATIO，窗口缩放时文字自动按比例缩放（自适应）
+        FONT_AREA = 1.0
+        FONT_INFO = 1.2
+        TH_AREA   = 2
+        TH_INFO   = 2
         for b in balls:
             cx, cy = int(b['cx']), int(b['cy'])
             r = max(5, int(math.sqrt(b['area'] / math.pi)))
             cv2.circle(debug_img, (cx, cy), r, (0, 255, 0), 2)
-            cv2.putText(debug_img, f"a={b['area']:.0f}",
-                        (cx + r + 5, cy), cv2.FONT_HERSHEY_SIMPLEX,
-                        0.4, (0, 255, 0), 1)
+            label = f"a={b['area']:.0f}"
+            pt = (cx + r + 5, cy)
+            cv2.putText(debug_img, label, pt, cv2.FONT_HERSHEY_SIMPLEX,
+                        FONT_AREA, (0, 0, 0), TH_AREA + 3)        # 黑色描边
+            cv2.putText(debug_img, label, pt, cv2.FONT_HERSHEY_SIMPLEX,
+                        FONT_AREA, (0, 255, 0), TH_AREA)          # 绿色主体
 
         raw = self._last_raw if hasattr(self, '_last_raw') else {}
         info_text = (
@@ -632,10 +641,12 @@ class TennisCollectorEnv(gym.Env):
             f"net={raw.get('net_distance', 0):.1f}m "
             f"bound={raw.get('dist_to_boundary', 0):.1f}m"
         )
-        cv2.putText(debug_img, info_text, (10, 25),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(debug_img, info_text, (10, 45), cv2.FONT_HERSHEY_SIMPLEX,
+                    FONT_INFO, (0, 0, 0), TH_INFO + 3)             # 黑色描边
+        cv2.putText(debug_img, info_text, (10, 45), cv2.FONT_HERSHEY_SIMPLEX,
+                    FONT_INFO, (255, 255, 255), TH_INFO)           # 白色主体
         # 首次显示时声明 WINDOW_NORMAL → 窗口可自由拖拽缩放
-        # WINDOW_KEEPRATIO 保持图像比例不被拉伸
+        # WINDOW_KEEPRATIO 保持图像比例不被拉伸；文字随图像同比例缩放（自适应）
         if not getattr(self, '_debug_window_inited', False):
             cv2.namedWindow("TennisRL Debug",
                             cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)

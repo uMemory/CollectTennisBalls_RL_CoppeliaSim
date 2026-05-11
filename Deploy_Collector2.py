@@ -606,6 +606,11 @@ def deploy(model_path, max_rounds=30):
     print("=" * 60)
     print("部署模式：RL Agent + 半场切换")
     print("=" * 60)
+    try:
+        input("\n按 Enter 确认开始部署，或 Ctrl+C 取消... ")
+    except (EOFError, KeyboardInterrupt):
+        print("\n取消部署")
+        return
 
     # 加载 RL 模型
     print(f"\n📂 加载模型: {model_path}")
@@ -645,11 +650,6 @@ def deploy(model_path, max_rounds=30):
     patrol_just_found_ball = False
 
     # ── 电机速度平滑（解决动作切换的速度阶跃 → 转向不连贯问题）──
-    # 原 env._execute_action 把目标速度瞬间设给电机然后 4 sim step 维持。
-    # 当 RL 在 action 1 (前进+左转) 和 2 (前进+右转) 间切换时，
-    # turn 速度瞬跳 +1.5 → -1.5 → +1.5，物理上抖动明显。
-    # 这里 monkey-patch 改成：单个 action 的 4 sim step 内从上一动作的目标速度
-    # 线性插值到当前动作的目标速度，电机输入连续不再阶跃。
     # 注意：仅在部署阶段使用，不影响训练（训练时仍是瞬间速度）
     from tennis_rl_env2 import ACTION_MAP, ACTION_REPEAT
     _smooth_state = {'prev_v_fwd': 0.0, 'prev_v_turn': 0.0}
