@@ -10,7 +10,7 @@
 
   <rect x="20" y="120" width="680" height="80" rx="8" fill="#fff3e0" stroke="#e65100" stroke-width="2"/>
   <text x="40" y="148" font-family="Consolas,monospace" font-size="16" font-weight="bold" fill="#bf360c">中层巡视（规则代码）</text>
-  <text x="40" y="178" font-family="Consolas,monospace" font-size="13" fill="#bf360c">S 形 6 路径点扫描，端点就近切入 + 严格 est_bx 阈值 + 连续 3 次确认</text>
+  <text x="40" y="178" font-family="Consolas,monospace" font-size="13" fill="#bf360c">C 形 4 路径点扫描，端点就近切入 + 三层 abort 过滤（est_dist&lt;5m + est_bx&gt;1.5/2.5m + 连续 3 次确认）</text>
 
   <rect x="20" y="220" width="680" height="80" rx="8" fill="#e8f5e9" stroke="#2e7d32" stroke-width="2"/>
   <text x="40" y="248" font-family="Consolas,monospace" font-size="16" font-weight="bold" fill="#1b5e20">底层 RL Agent（Gymnasium 环境 TennisCollectorEnv）</text>
