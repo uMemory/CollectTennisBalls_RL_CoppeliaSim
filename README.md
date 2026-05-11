@@ -1,4 +1,4 @@
-# 🎾 TennisBallsCollector — 基于纯视觉强化学习的 YouBot 网球收集机器人
+# 🎾 TennisBallsCollector — 基于仿真平台 CoppeliaSim 的纯视觉强化学习 YouBot 网球收集机器人
 
 <p align="center">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white">
@@ -14,7 +14,7 @@
 
 ## 📖 项目简介
 
-本项目实现了一个 **完整工程化** 的纯视觉驱动强化学习捡网球系统，核心特点：
+本项目作为一个课程项目，实现了一个 **完整工程化** 的纯视觉驱动强化学习捡网球系统，核心特点：
 
 - **纯视觉感知**：YouBot 仅依赖一个前向 RGB visionSensor（1024×1024），**不依赖深度信息**，仅依靠 HSV 颜色分割 + 轮廓像素面积估计距离与方位。
 - **半场专注式 RL**：将"全场捡球"这一巨型任务拆解为"半场内单球收集"的 Gym 环境（一个 episode = 在当前半场内消除一个球），使 PPO 能在合理时间内收敛。
@@ -110,8 +110,6 @@ conda activate tennis
 # 安装依赖
 pip install -r requirements.txt
 
-# 如需 GPU 版 PyTorch (CPU 训练已足够，可跳过)
-pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
 ```
 
 ### 2. 启动 CoppeliaSim 场景
