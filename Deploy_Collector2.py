@@ -649,33 +649,6 @@ def deploy(model_path, max_rounds=30):
     # 避免"巡视发现球 → RL 重启 → 瞬间卡住 → 又巡视"死循环 → ZMQ 过载崩溃
     patrol_just_found_ball = False
 
-    # ── 电机速度平滑（解决动作切换的速度阶跃 → 转向不连贯问题）──
-    # 注意：仅在部署阶段使用，不影响训练（训练时仍是瞬间速度）
-    from tennis_rl_env2 import ACTION_MAP, ACTION_REPEAT
-    _smooth_state = {'prev_v_fwd': 0.0, 'prev_v_turn': 0.0}
-
-    def _smoothed_execute(action_id):
-        params = ACTION_MAP[action_id]
-        target_v_fwd = params['forward']
-        target_v_turn = params['turn']
-        prev_v_fwd = _smooth_state['prev_v_fwd']
-        prev_v_turn = _smooth_state['prev_v_turn']
-        # 4 sim step 内从 prev → target 线性渐变
-        for i in range(ACTION_REPEAT):
-            t = (i + 1) / ACTION_REPEAT      # 0.25, 0.5, 0.75, 1.0
-            v_fwd = (1 - t) * prev_v_fwd + t * target_v_fwd
-            v_turn = (1 - t) * prev_v_turn + t * target_v_turn
-            env._set_motors(
-                v_fwd + v_turn, v_fwd - v_turn,
-                v_fwd + v_turn, v_fwd - v_turn,
-            )
-            env.sim.step()
-        _smooth_state['prev_v_fwd'] = target_v_fwd
-        _smooth_state['prev_v_turn'] = target_v_turn
-
-    env._execute_action = _smoothed_execute
-    print("✅ 电机速度平滑已启用（4-step 线性渐变）")
-
     # 部署启动：做一次真正的 env.reset() 初始化 frame buffer 和内部状态
     # 之后所有轮次都用 soft_reset()，保留 YouBot 位置由规则代码接管导航
     print("\n🔧 初始化环境（首次 reset 会随机选定部署起始位置）...")
@@ -855,7 +828,6 @@ def deploy(model_path, max_rounds=30):
             if final_action in (7, 8) and not ball_det_now:
                 consecutive_blind_backward += 1
                 if consecutive_blind_backward >= 3:
-                    # 选转向方向：朝己方半场内部，避免一直退向同一边
                     target_dir_x = 1.0 if active_half > 0 else -1.0
                     target_yaw_b = math.atan2(0.0 - ry_check, target_dir_x * 4.0 - rx_check)
                     angle_err_b = ((target_yaw_b - ryaw_check + math.pi) % (2 * math.pi)) - math.pi
@@ -911,7 +883,7 @@ def deploy(model_path, max_rounds=30):
 
         # 连续失败 → 巡视
         if no_ball_streak >= NO_BALL_THRESHOLD:
-            print(f"  🔍 连续 {no_ball_streak} 次失败，触发巡视...")
+            print(f"🔍 连续 {no_ball_streak} 次失败，触发巡视...")
             found = navigator.patrol_half(active_half)
             if found:
                 patrol_just_found_ball = True

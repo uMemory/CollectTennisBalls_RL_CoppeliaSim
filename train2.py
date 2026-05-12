@@ -27,10 +27,6 @@ PPO 训练脚本 v2：对 train.py 的全面优化版本。
   ./logs_v2/          TensorBoard 日志 (独立于 train.py 的 ./logs/)
   ./models_v2/        定期保存的模型检查点
   ./models_v2/final/  最终模型
-
-依赖:
-  pip install stable-baselines3 gymnasium numpy opencv-python
-  pip install coppeliasim_zmqremoteapi_client
 """
 
 import os
@@ -55,8 +51,8 @@ from tennis_rl_env2 import TennisCollectorEnv
 # ── 环境参数 ──
 ACTIVE_HALF    = 1         # 训练在 X>0 半场
 
-# ── PPO 超参数（v2 调优版） ──
-TOTAL_TIMESTEPS = 500_000
+# ── PPO 超参数 ──
+TOTAL_TIMESTEPS = 200_000
 # v2: 学习率从 3e-4 线性衰减到 1e-4,避免后期抖动
 LEARNING_RATE_INIT = 3e-4
 LEARNING_RATE_END  = 1e-4
@@ -91,15 +87,15 @@ POLICY_KWARGS = dict(
 )
 
 # ── 保存与日志 (v2 独立路径) ──
-LOG_DIR         = "./logs_v2"
-MODEL_DIR       = "./models_v2"
-CHECKPOINT_DIR  = "./models_v2/checkpoints"
-FINAL_MODEL_DIR = "./models_v2/final"
-BEST_MODEL_DIR  = "./models_v2/best_model"
-SAVE_FREQ       = 10_000
+LOG_DIR              = "./logs_v2"
+MODEL_DIR            = "./models_v2"
+CHECKPOINT_DIR       = "./models_v2/checkpoints"
+FINAL_MODEL_DIR      = "./models_v2/final"
+BEST_MODEL_DIR       = "./models_v2/best_model"
+SAVE_FREQ            = 10_000
 BEST_MODEL_SAVE_FREQ = 5000
 BEST_MODEL_WINDOW    = 50     # 计算滚动平均奖励的窗口大小（episode 数）
-LOG_STATE_PATH  = "./models_v2/train_log_state.json"  # TrainingLogCallback 的持久化状态
+LOG_STATE_PATH       = "./models_v2/train_log_state.json"  # TrainingLogCallback 的持久化状态
 
 # =====================================================================
 #  训练日志回调

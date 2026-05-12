@@ -609,9 +609,9 @@ class TennisCollectorEnv(gym.Env):
 
     def _render_debug(self, img_bgr, balls):
         debug_img = img_bgr.copy()
-        # 字号放大 + 黑色描边；WINDOW_KEEPRATIO 下文字随窗口缩放自适应
-        FONT_AREA = 1.0
-        FONT_INFO = 1.2
+        h, w = debug_img.shape[:2]
+        FONT_AREA = 0.8
+        FONT_INFO = 0.9
         TH_AREA   = 2
         TH_INFO   = 2
         for b in balls:
@@ -619,24 +619,27 @@ class TennisCollectorEnv(gym.Env):
             r = max(5, int(math.sqrt(b['area'] / math.pi)))
             cv2.circle(debug_img, (cx, cy), r, (0, 255, 0), 2)
             label = f"a={b['area']:.0f}"
-            pt = (cx + r + 5, cy)
-            cv2.putText(debug_img, label, pt, cv2.FONT_HERSHEY_SIMPLEX,
-                        FONT_AREA, (0, 0, 0), TH_AREA + 3)
-            cv2.putText(debug_img, label, pt, cv2.FONT_HERSHEY_SIMPLEX,
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX,
+                                          FONT_AREA, TH_AREA)
+            tx = min(cx + r + 5, w - tw - 5)
+            ty = max(th + 5, min(cy, h - 5))
+            cv2.putText(debug_img, label, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX,
                         FONT_AREA, (0, 255, 0), TH_AREA)
 
         raw = self._last_raw if hasattr(self, '_last_raw') else {}
-        info_text = (
-            f"step={self.step_count} "
-            f"det={raw.get('ball_detected', '?')} "
-            f"reach={raw.get('ball_is_reachable', '?')} "
-            f"net={raw.get('net_distance', 0):.1f}m "
+        info_line1 = (
+            f"step={self.step_count}  "
+            f"det={raw.get('ball_detected', '?')}  "
+            f"reach={raw.get('ball_is_reachable', '?')}"
+        )
+        info_line2 = (
+            f"net={raw.get('net_distance', 0):.1f}m  "
             f"bound={raw.get('dist_to_boundary', 0):.1f}m"
         )
-        cv2.putText(debug_img, info_text, (10, 45), cv2.FONT_HERSHEY_SIMPLEX,
-                    FONT_INFO, (0, 0, 0), TH_INFO + 3)
-        cv2.putText(debug_img, info_text, (10, 45), cv2.FONT_HERSHEY_SIMPLEX,
-                    FONT_INFO, (255, 255, 255), TH_INFO)
+        for i, line in enumerate((info_line1, info_line2)):
+            y_pos = 35 + i * 32
+            cv2.putText(debug_img, line, (10, y_pos), cv2.FONT_HERSHEY_SIMPLEX,
+                        FONT_INFO, (255, 255, 255), TH_INFO)
         # 首次显示时声明 WINDOW_NORMAL → 窗口可自由拖拽缩放
         if not getattr(self, '_debug_window_inited', False):
             cv2.namedWindow("TennisRL Debug",
