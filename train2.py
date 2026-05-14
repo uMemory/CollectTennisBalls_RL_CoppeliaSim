@@ -52,7 +52,7 @@ from tennis_rl_env2 import TennisCollectorEnv
 ACTIVE_HALF    = 1         # 训练在 X>0 半场
 
 # ── PPO 超参数 ──
-TOTAL_TIMESTEPS = 200_000
+TOTAL_TIMESTEPS = 500_000
 # v2: 学习率从 3e-4 线性衰减到 1e-4,避免后期抖动
 LEARNING_RATE_INIT = 3e-4
 LEARNING_RATE_END  = 1e-4
@@ -461,7 +461,7 @@ def evaluate(model_path, n_episodes=10):
 #  继续训练（从检查点恢复）
 # =====================================================================
 
-def resume_training(checkpoint_path, additional_timesteps=500_000):
+def resume_training(checkpoint_path, additional_timesteps=210_000):
     """从已保存的 v2 检查点继续训练。
 
     注意: v2 动作空间为 9 维, **不能**加载 train.py (v1, 7 维) 的模型。

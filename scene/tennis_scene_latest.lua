@@ -1,5 +1,5 @@
 -- ============================================================
---  tennis_scene_v7.lua  1:1 真实比例网球场
+--  高仿真 1:1 真实比例网球场
 --  CoppeliaSim 4.10.0
 --  全部尺寸为真实世界米制，无任何缩放
 --  球场 23.77m×10.97m  |  网球直径 6.7cm  |  球网高 0.914m
@@ -37,7 +37,7 @@ end
 --  缝线曲线: θ(t)=t, φ(t)=A·sin(2t), t∈[0,2π]
 -- ────────────────────────────────────────────────────────────
 local function createTennisBall(name, pos)
-    local R      = 0.0335                    -- 半径 33.5mm (ITF: 6.54~6.86cm 直径)
+    local R      = 0.0335                    -- 网球半径 33.5mm (ITF: 6.54~6.86cm 直径)
     local mass   = 0.057                     -- 57g
     local seamR  = 0.0018                    -- 缝线粒子半径
     local A      = 0.38                      -- 缝线振幅 (弧度)
@@ -151,22 +151,22 @@ local FW = OW + 2.0            -- 围栏宽 ≈20.29m
 
 -- ── 颜色 ─────────────────────────────────────────────────────
 local C = {
-    ground     = {0.35, 0.42, 0.32},
-    outer      = {0.45, 0.63, 0.40},
-    inner      = {0.22, 0.45, 0.72},
-    line       = {0.96, 0.96, 0.96},
-    net_post   = {0.75, 0.78, 0.75},
-    net_band   = {0.92, 0.92, 0.92},
-    net_mesh   = {0.12, 0.12, 0.12},
-    fence_post = {0.18, 0.40, 0.22},
-    fence_mesh = {0.20, 0.45, 0.25},
-    fence_rail = {0.22, 0.48, 0.28},
-    light_pole = {0.50, 0.52, 0.50},
-    light_head = {0.60, 0.62, 0.58},
-    light_lamp = {0.95, 0.95, 0.85},
-    bin_body   = {0.25, 0.55, 0.30},
-    bin_rim    = {0.80, 0.82, 0.78},
-    bench      = {0.20, 0.45, 0.25},
+    ground     = {0.35, 0.42, 0.32},    -- 地面深灰绿
+    outer      = {0.45, 0.63, 0.40},    -- 外场绿色 (仿真真实硬地)
+    inner      = {0.22, 0.45, 0.72},    -- 内场蓝色 (US Open 风格)
+    line       = {0.96, 0.96, 0.96},    -- 白线
+    net_post   = {0.75, 0.78, 0.75},    -- 网柱银色
+    net_band   = {0.92, 0.92, 0.92},    -- 网带白色
+    net_mesh   = {0.12, 0.12, 0.12},    -- 网体深色
+    fence_post = {0.18, 0.40, 0.22},    -- 围栏柱深绿
+    fence_mesh = {0.20, 0.45, 0.25},    -- 围栏网绿色
+    fence_rail = {0.22, 0.48, 0.28},    -- 围栏横杆
+    light_pole = {0.50, 0.52, 0.50},    -- 灯柱灰色
+    light_head = {0.60, 0.62, 0.58},    -- 灯头
+    light_lamp = {0.95, 0.95, 0.85},    -- 灯光色
+    bin_body   = {0.25, 0.55, 0.30},    -- 回收仓绿色
+    bin_rim    = {0.80, 0.82, 0.78},    -- 回收仓边框
+    bench      = {0.20, 0.45, 0.25},    -- 长椅绿色
 }
 
 -- ══════════════════════════════════════════════════════════════
@@ -174,14 +174,14 @@ local C = {
 --
 --  关键设计: 视觉分层 + 物理合一
 --  ┌─────────────────────────────────────────────────────────┐
---  │ 视觉层 (非 respondable, 仅供渲染)                        │
---  │   - 蓝色内场顶面 z = +0.012                              │
---  │   - 绿色外场顶面 z = +0.004                              │
---  │   - 两层 z 差 8mm, 远超 Z-fighting 阈值, 渲染稳定        │
---  │                                                          │
---  │ 物理层 (respondable, 可选不可见)                         │
---  │   - 单一平整碰撞面, 顶面 z = 0.000, 覆盖整个场地          │
---  │   - YouBot 始终在一个连续平面上滚动, 绝无台阶            │
+--  │ 视觉层 (非 respondable, 仅供渲染)                          │
+--  │   - 蓝色内场顶面 z = +0.012                               │
+--  │   - 绿色外场顶面 z = +0.004                               │
+--  │   - 两层 z 差 8mm, 远超 Z-fighting 阈值, 渲染稳定           │
+--  │                                                         │
+--  │ 物理层 (respondable, 可选不可见)                           │
+--  │   - 单一平整碰撞面, 顶面 z = 0.000, 覆盖整个场地              │
+--  │   - YouBot 始终在一个连续平面上滚动, 绝无台阶                 │
 --  └─────────────────────────────────────────────────────────┘
 -- ══════════════════════════════════════════════════════════════
 
@@ -195,7 +195,7 @@ sim.setObjectInt32Param(physGround, sim.shapeintparam_respondable, 1)
 sim.setShapeColor(physGround, nil, sim.colorcomponent_ambient_diffuse, C.ground)
 sim.setObjectAlias(physGround, "Ground_Physics")
 -- 把物理层放到一个独立图层, 默认不渲染, 调试时可通过 Layer Selection 打开
--- CoppeliaSim 的可见层默认是 1..8, 这里用 layer 9 (bit 256) 隐藏
+-- CoppeliaSim 的可见层默认是 1..8, 用 layer 9 (bit 256) 隐藏
 sim.setObjectInt32Param(physGround, sim.objintparam_visibility_layer, 256)
 
 -- ---- 视觉层: 绿色外场 (薄片, 不参与碰撞) ---------------------
@@ -228,11 +228,11 @@ sim.setObjectAlias(visBase, "Ground_Base")
 -- ══════════════════════════════════════════════════════════════
 --  ② 白线 (ITF 标准, 线宽 5cm)
 -- ══════════════════════════════════════════════════════════════
-local LT = 0.05
-local LE = 0.005
+local LT = 0.05     -- 线宽
+local LE = 0.005    -- 线高于地面
 -- 白线略高于蓝色内场视觉面 (z=0.012), 避免 Z-fighting
 -- 0.012 (蓝面顶) + LE/2 (线厚一半) + 0.003 (安全间距) = 0.0175 ≈ 0.018
-local LZ = 0.018
+local LZ = 0.018    -- 线 z 坐标
 local LC = C.line
 
 -- 底线: X = ±CL/2, 平行 Y, 长度 = DW
@@ -309,8 +309,8 @@ sim.setObjectInt32Param(netWall, sim.objintparam_visibility_layer, 0)
 -- ══════════════════════════════════════════════════════════════
 --  ④ 围栏 (绿色, 高 3m)
 -- ══════════════════════════════════════════════════════════════
-local FH  = 3.0
-local FpR = 0.04
+local FH  = 3.0     -- 围栏高度
+local FpR = 0.04    -- 立柱半径
 
 local function fencePost(name, x, y)
     cyl(name, {x, y, FH/2}, nil, FpR, FH, C.fence_post, true)
@@ -437,7 +437,7 @@ sim.setObjectAlias(bd, "Bin_Entry")
 -- ══════════════════════════════════════════════════════════════
 math.randomseed(42)
 local ballR = 0.0335
-print("🎾 正在生成仿真缝线网球...")
+print("🕸️ 正在生成仿真缝线网球...")
 
 for i = 1, 12 do
     local bx, by
@@ -458,7 +458,7 @@ for i = 1, 12 do
     )
 
     if i % 4 == 0 then
-        print(string.format("    已生成 %d/12 个网球...", i))
+        print(string.format("已生成 %d/12 个网球...", i))
     end
 end
 
@@ -466,16 +466,15 @@ end
 --  完成
 -- ══════════════════════════════════════════════════════════════
 print("═══════════════════════════════════════════════════════")
-print("✅  真实比例网球场景 v7 生成完毕 (1:1 无缩放)")
+print("✅  真实比例网球场景 生成完毕 (1:1 无缩放)")
 print("─────────────────────────────────────────────────────")
-print(string.format("  🏟️  球场:  %.2fm × %.2fm", CL, DW))
-print(string.format("  🟢  外场:  %.1fm × %.1fm", OL, OW))
-print(string.format("  🔲  围栏:  %.1fm × %.1fm  高 %.1fm", FL, FW, FH))
-print(string.format("  🥅  球网:  高 %.3fm  宽 %.2fm", NH, netW))
-print(string.format("  🎾  网球:  直径 %.1fmm × 12 个 (含缝线)", ballR * 2 * 1000))
-print(string.format("  💡  灯柱:  %.1fm × 4 根", lightH))
-print(string.format("  📦  回收仓: (%.1f, %.1f)", BX, BY))
+print(string.format("🏟️  球场:  %.2fm × %.2fm", CL, DW))
+print(string.format("🟢  外场:  %.1fm × %.1fm", OL, OW))
+print(string.format("🔲  围栏:  %.1fm × %.1fm  高 %.1fm", FL, FW, FH))
+print(string.format("🥅  球网:  高 %.3fm  宽 %.2fm", NH, netW))
+print(string.format("🎾  网球:  直径 %.1fmm × 12 个 (含缝线)", ballR * 2 * 1000))
+print(string.format("💡  灯柱:  %.1fm × 4 根", lightH))
+print(string.format("📦  回收仓: (%.1f, %.1f)", BX, BY))
 print("─────────────────────────────────────────────────────")
-print("  📌  手动加载 KUKA YouBot: Model Browser → robots → mobile")
-print("  📌  File → Save Scene As → tennis_court_v7.ttt")
+print("📌  手动加载 KUKA YouBot: Model Browser → robots → mobile")
 print("═══════════════════════════════════════════════════════")
