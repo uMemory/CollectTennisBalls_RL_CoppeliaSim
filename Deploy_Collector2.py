@@ -822,17 +822,19 @@ def deploy(model_path, max_rounds=30):
                       f"a({final_action})→a({safe_action})")
                 final_action = safe_action
 
-            # ── 兜底：连续无目标后退打破 ──
-            # 偶发场景：吃完球后 frame buffer 时序信息丢失，RL 可能盲目连续 backward
-            # 当连续 3 步执行 backward 且全程没看到球 → 改为大转向探索
-            if final_action in (7, 8) and not ball_det_now:
+            # ── 兜底：靠近球网时连续无目标后退打破 ──
+            # 偶发场景：吃完球后 frame buffer 时序信息丢失，RL 可能盲目连续 backward。
+            # 仅在靠近球网时触发（|rx| < 1.5m），因为网后盲退可能撞网。
+            # 靠近边界时后退是正确的逃生行为，不应被覆盖。
+            near_net_blind = abs(rx_check) < 1.5
+            if final_action in (7, 8) and not ball_det_now and near_net_blind:
                 consecutive_blind_backward += 1
                 if consecutive_blind_backward >= 3:
                     target_dir_x = 1.0 if active_half > 0 else -1.0
                     target_yaw_b = math.atan2(0.0 - ry_check, target_dir_x * 4.0 - rx_check)
                     angle_err_b = ((target_yaw_b - ryaw_check + math.pi) % (2 * math.pi)) - math.pi
                     safe_action = 5 if angle_err_b > 0 else 6
-                    print(f"🔄 打破盲退: 连续 {consecutive_blind_backward} 步无目标后退 "
+                    print(f"🔄 打破盲退(近网): 连续 {consecutive_blind_backward} 步无目标后退 "
                           f"→ a({final_action})→a({safe_action})")
                     final_action = safe_action
                     consecutive_blind_backward = 0
