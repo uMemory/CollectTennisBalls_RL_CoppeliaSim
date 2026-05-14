@@ -1,4 +1,4 @@
 .idea/
 __pycache__/
 models/checkpoints/
-models_v2/
+models_v2/checkpoints/
