@@ -305,20 +305,31 @@ class TennisCollectorEnv(gym.Env):
         est_by = robot_y + est_dist * math.sin(ball_world_angle)
         return est_bx, est_by, est_dist
 
-    def _ball_in_active_half(self, est_bx, strict=False):
+    def _ball_in_active_half(self, est_bx, strict=False, est_dist=None, robot_x=None):
         """
         判断估计球位置是否在活跃半场。
 
-        strict=True  : 严格半场内（est_bx > 0 for X>0 half）
-                       用于观察过滤，彻底排除对面球的干扰。
+        strict=True  : 用于观察过滤，彻底排除对面球的干扰。
+                       当 robot_x 和 est_dist 都传入时，使用动态 margin：
+                         margin = est_dist * 0.35 * (1 - |rx|/3.0)
+                       像素面积反算距离有 ~35% 误差，靠近球网时 est_bx
+                       符号翻转风险更高，所以 margin 随近网程度线性增大。
+                       球必须 est_bx > margin 才算在己方半场。
         strict=False : 容忍 0.5m 的距离估计误差（est_bx > -0.5）
                        用于 ball_reachable 可达标志，避免误杀网边的球。
         """
-        margin = 0.0 if strict else 0.5
-        if self.active_half > 0:
-            return est_bx > -margin
+        if strict and est_dist is not None and robot_x is not None:
+            margin = est_dist * 0.35 * max(0.0, 1.0 - abs(robot_x) / 3.0)
+            if self.active_half > 0:
+                return est_bx > margin
+            else:
+                return est_bx < -margin
         else:
-            return est_bx < margin
+            margin = 0.0 if strict else 0.5
+            if self.active_half > 0:
+                return est_bx > -margin
+            else:
+                return est_bx < margin
 
     # =================================================================
     #  几何工具
@@ -360,7 +371,7 @@ class TennisCollectorEnv(gym.Env):
             b['est_bx'] = est_bx
             b['est_by'] = est_by
             b['est_dist'] = est_dist
-            if self._ball_in_active_half(est_bx, strict=True):
+            if self._ball_in_active_half(est_bx, strict=True, est_dist=est_dist, robot_x=rx):
                 balls_filtered.append(b)
 
         # 用于 debug 渲染：标记哪些被过滤掉了
